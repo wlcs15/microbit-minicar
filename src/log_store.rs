@@ -19,6 +19,8 @@ pub enum EventKind {
     MotorPulse = 4,
     ChassisDelta = 5,
     Note = 6,
+    /// Motor A/B → left/right from a chassis pulse (`x`/`y` = [`crate::wheel_map::WheelSide`]).
+    WheelMap = 7,
 }
 
 impl EventKind {
@@ -30,6 +32,7 @@ impl EventKind {
             4 => Some(Self::MotorPulse),
             5 => Some(Self::ChassisDelta),
             6 => Some(Self::Note),
+            7 => Some(Self::WheelMap),
             _ => None,
         }
     }
@@ -161,6 +164,11 @@ pub enum LogError {
     Full,
 }
 
+/// Mark the RAM image empty (erased flash is 0xFF). Firmware must erase NVMC.
+pub fn clear(area: &mut [u8]) {
+    area.fill(0xFF);
+}
+
 pub fn append(area: &mut [u8], rec: &LogRecord) -> Result<usize, LogError> {
     let off = next_slot(area).ok_or(LogError::Full)?;
     let bytes = encode(rec);
@@ -204,6 +212,7 @@ mod tests {
             EventKind::MotorPulse,
             EventKind::ChassisDelta,
             EventKind::Note,
+            EventKind::WheelMap,
         ] {
             let mut r = rec(1);
             r.kind = k;
@@ -229,6 +238,7 @@ mod tests {
     fn kind_from_u8() {
         assert_eq!(EventKind::from_u8(1), Some(EventKind::ClockSet));
         assert_eq!(EventKind::from_u8(6), Some(EventKind::Note));
+        assert_eq!(EventKind::from_u8(7), Some(EventKind::WheelMap));
         assert_eq!(EventKind::from_u8(0), None);
         assert_eq!(EventKind::from_u8(99), None);
     }
@@ -267,5 +277,15 @@ mod tests {
         assert_eq!(b.seq, 2);
         assert_eq!(a.x, i16::MAX);
         assert_eq!(a.y, i16::MIN);
+    }
+
+    #[test]
+    fn clear_wipes_records() {
+        let mut area = [0xFFu8; PAGE_SIZE];
+        append(&mut area, &rec(1)).unwrap();
+        assert_eq!(iter_valid(&area).count(), 1);
+        clear(&mut area);
+        assert_eq!(iter_valid(&area).count(), 0);
+        assert_eq!(next_slot(&area), Some(0));
     }
 }

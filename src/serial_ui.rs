@@ -14,6 +14,8 @@ pub enum Cmd {
     LedCount,
     ShowRtc,
     ClearRtc,
+    ClearLog,
+    WheelCal,
     Menu,
 }
 
@@ -76,6 +78,8 @@ impl SerialUi {
                 b'5' => Some(Cmd::LedCount),
                 b'6' => Some(Cmd::ShowRtc),
                 b'7' => Some(Cmd::ClearRtc),
+                b'8' => Some(Cmd::ClearLog),
+                b'9' => Some(Cmd::WheelCal),
                 _ => None,
             };
             if let Some(cmd) = digit {
@@ -176,6 +180,8 @@ mod tests {
         assert_eq!(ui.push_byte(b'5'), Some(Cmd::LedCount));
         assert_eq!(ui.push_byte(b'6'), Some(Cmd::ShowRtc));
         assert_eq!(ui.push_byte(b'7'), Some(Cmd::ClearRtc));
+        assert_eq!(ui.push_byte(b'8'), Some(Cmd::ClearLog));
+        assert_eq!(ui.push_byte(b'9'), Some(Cmd::WheelCal));
         assert_eq!(ui.push_byte(b'3'), Some(Cmd::DebugOn));
         assert!(ui.debug_on);
     }

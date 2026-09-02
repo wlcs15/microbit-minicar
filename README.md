@@ -2,7 +2,7 @@
 
 Rust drivers and examples for the **HolaSmart HS1002** car on a BBC **micro:bit v2**.
 
-This is the **wlcs15** fork (`https://github.com/wlcs15/microbit-minicar`). Keyestudio MiniCar motor encoding is not kept. Branch for this port: `holasmart_HS1002`. Current tag: **v1.4**.
+This is the **wlcs15** fork (`https://github.com/wlcs15/microbit-minicar`). Keyestudio MiniCar motor encoding is not kept. Branch for this port: `holasmart_HS1002`. Current tag: **v0.05**.
 
 ## What this crate gives you
 
@@ -94,8 +94,9 @@ This is **not** “Rust does not do on-target tests.” Industry practice for em
 
 | Layer | How | What it covers |
 |---|---|---|
-| Host unit | `cargo test --lib --target x86_64-unknown-linux-gnu` | 61 tests: clock, UI, log, motor FakeI2c, ring, ultra mocks |
-| On-target self-test | `clock_idle` menu **`4`** | `selftest::run_all` (no libtest) |
+| Host unit | `cargo test --lib --target x86_64-unknown-linux-gnu` | 66 tests: clock, UI, log, motor FakeI2c, ring, ultra, wheel_map |
+| On-target self-test | `clock_idle` menu **`4`** (**1**) | `selftest::run_all` over CDC |
+| Probe on-chip | `./utils/run_on_target_tests.sh` (**2**) | `embedded-test` via DAPLink; **overwrites** `clock_idle` until you re-flash |
 
 On-target “tests” that are **examples** (`led_color_set`, `ultra`, …) are bring-up, not a test report. Python GUI/PTY tests stay on the host only.
 
@@ -113,9 +114,9 @@ Only options that work on the **micro:bit v2 nRF52833** with **this** Cargo/`thu
 
 | # | Approach | Feasible here | Role |
 |---|---|---|---|
-| **1** | Expand `selftest::run_all` (menu `4`) | **Yes — in use** | Same product binary; CDC UART; no extra crates. Add `check_eq` for each host case. |
-| **2** | [`embedded-test`](https://github.com/probe-rs/embedded-test) + `probe-rs` over **onboard CMSIS-DAP** | **Yes** | `harness = false`; `cargo test` flashes via DAPLink (`--probe 0d28:0204`, chip `nRF52833_xxAA`) and runs `#[test]` on the MCU. Closest to C Unity-on-target. Overwrites `clock_idle` while tests run. Does **not** use an external ARM JTAG. |
-| **3** | Custom `harness = false` UART TAP example | **Yes** | A dedicated example that prints TAP/`PASS n/m` on CDC, same IRQ UART as `clock_idle`. Overlaps **1**; useful if menu `4` flash budget is tight. |
+| **1** | Expand `selftest::run_all` (menu `4`) | **Implemented** | Product binary; CDC; no extra crates. |
+| **2** | [`embedded-test`](https://github.com/probe-rs/embedded-test) + `probe-rs` over **onboard CMSIS-DAP** | **Implemented** | `./utils/run_on_target_tests.sh`. Does **not** use an external ARM JTAG. Re-flash `clock_idle` after. |
+| **3** | Custom UART TAP example | **Skipped (overlaps 1)** | Same `run_all` over CDC as menu `4`. |
 
 Not listed (not fully feasible on this board/environment): external JTAG/SWD (no header); `defmt-test` + RTT (`cargo embed`/RTT failed here); QEMU/Renode (nRF52833 model incomplete); on-chip llvm-cov (no counter dump path); Python on the target.
 
@@ -132,7 +133,27 @@ Rust is different **only in the default runner**, not in the need:
 | Same compiler as product | Often mandatory for certification | Same: you must build `thumbv7em-none-eabihf` tests, not only x86 |
 | Coverage | gcov/lcov on host or simulator; on-chip gcov is painful | llvm-cov on **host** is the practical path |
 
-So: **it is industry-normal to run unit tests on the MCU in both languages.** Rust teams often do **more** on the host first (because the language makes FakeI2c/`embedded-hal` mocks easy), then add a probe harness for HAL and integration. Approach **1** (menu `4`) is the floor-test path. Approach **2** (`embedded-test` + onboard DAPLink) is how to run the remaining host `#[test]` cases on the chip without rewriting them as `check_eq`.
+So: **it is industry-normal to run unit tests on the MCU in both languages.** Approach **1** (menu `4`) is the floor-test path. Approach **2** is probe-rs `embedded-test`. Approach **3** was not added because it duplicates **1**.
+
+## Next software loads (toward full HS1002)
+
+Flash **`clock_idle` only** as the daily image. Do not flash `motor` until mapping is confirmed.
+
+| Order | Load / change | Why | USB? |
+|---|---|---|---|
+| **Now** | `clock_idle` | IRQ UART, menu **8** erase flash log, menu **9** / **Button B** wheel map, menu 4 selftest | Optional |
+| **A** | Confirm Motor A vs B → Left/Right | Car **on the floor**, batteries ON, USB unplugged. Button B: LED `A` then `L`/`R`/`U`, then `B` then side. Result in flash (`WheelMap`). Re-run if `U`/`N` (not level / wheels up). | No |
+| **B** | Drive helpers using that map | `motor::set` with layout so “forward” means both wheels the same way. Short Button-A creep, not a drain loop. | No |
+| **C** | Rest gate on every pulse | Already used in wheel map; keep it for all motion so a held car never drives. | No |
+| **D** | Line sensors P12/P13 | Follow/stop on tape once wheels map is trusted. | No |
+| **E** | Ultrasonic P14/P15 | Obstacle halt. | No |
+| **F** | RGB / matrix status | Battery/log/map state without serial. | No |
+| **G** | IR / extra kit features | Later. | — |
+| **Never until G** | `examples/motor.rs` | Continuous drive; drains AAAs. |
+
+Wheel-map **convention:** board axes, display up: `PosX`/`PosY` → Right, `NegX`/`NegY` → Left. If both sides come out `U`, the pulse did not move the chassis (wheels in the air or IMU fail `X`).
+
+## Clock, serial, and flash log
 
 ## Clock, serial, and flash log
 
@@ -155,8 +176,9 @@ Keep the RTC running: **power switch ON**, batteries in, avoid reset/reflash. US
 - 5×5 shows **T** until wall time is set. A **U** flash means a UART byte was received.
 - After `T=<unix>` (UTC), scrolls **`DD/MM/YYYY HH:MM:SS`** (19 characters).
 - USB serial 115200. **Debug stream is ON by default** (`dbg ticks=...`). Any key that is not a `T=` line stops debug and prints the **full MENU**.
-- Menu: `1` status, `2` dump, `3` start debug, `4` on-target tests, `5` LED 1–9, `6` show RTC, `7` clear RTC to 000000 msec, `T=<10-digit unix>` set clock, `?` menu.
+- Menu: `1` status, `2` dump, `3` start debug, `4` on-target tests, `5` LED 1–9, `6` show RTC, `7` clear RTC to 000000 msec, **`8` erase flash log**, **`9` wheel map**, `T=<10-digit unix>` set clock, `?` menu.
 - **Button A:** log **count** on the LED matrix. Serial dump **only if debug logging is on**. Hold ~600 ms.
+- **Button B:** same as menu `9` — IMU rest check, short Motor A then B pulses, store `WheelMap` in flash. Works with USB unplugged.
 - Log region: `0x0007E000`–`0x00080000`.
 
 ### Serial GUI vs minicom vs debug
@@ -196,14 +218,16 @@ python3 tools/clock_gui.py   # Open /dev/ttyACM1, not ACM0 (Pi debug probe)
 
 Do **not** flash `motor` until mapping is done. It is a continuous drive loop and drains AAAs.
 
-1. `clock_idle` — stop motors, IRQ UART, set clock, flash log (current)
-2. `led_color_set` — I2C RGB, motors stopped
-3. `accel_motor_map` — short motor pulses if chassis is at rest
-4. `motor_spin` — one motor at a time
-5. `motor` — last, full drive cycle
+1. `clock_idle` — daily: clock, log, menu. Menu `9` is USB debug for wheel map.
+2. `wheel_cal` — **floor calibration image** (Button A starts; Button B N/NE vs degrees). Flash this for motor↔wheel mapping without USB.
+3. `led_color_set` — I2C RGB, motors stopped
+4. `accel_motor_map` — older RTT pulse helper
+5. `motor_spin` — one motor at a time
+6. `motor` — last, full drive cycle; do not flash until mapping is confirmed
 
 ```bash
 cargo flash --chip nRF52833_xxAA --probe 0d28:0204 --example clock_idle
+cargo flash --chip nRF52833_xxAA --probe 0d28:0204 --example wheel_cal
 ```
 
 Use `--probe 0d28:0204` so the micro:bit is selected, not another CMSIS-DAP.

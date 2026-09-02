@@ -10,6 +10,8 @@ use cortex_m_rt::entry;
 use embedded_hal::delay::DelayNs;
 use embedded_hal::digital::InputPin;
 use embedded_storage::nor_flash::{NorFlash, ReadNorFlash};
+use lsm303agr::mode::MagOneShot;
+use lsm303agr::{AccelMode, AccelOutputDataRate, Lsm303agr};
 use microbit::{
     display::blocking::Display,
     hal::{
@@ -26,15 +28,18 @@ use microbit::{
 #[path = "uart_irq.rs"]
 mod uart_irq;
 use microbit_minicar::clock::{
-    format_mmddyyyy_hhmmss, format_msec6, WallClock, STAMP_LEN,
+    format_mmddyyyy_hhmmss, format_msec6, WallClock,
 };
+use microbit_minicar::hw_bus;
 use microbit_minicar::led;
 use microbit_minicar::log_store::{
     append, iter_valid, EventKind, LogError, LogRecord, Seq, PAGE_SIZE,
 };
-use microbit_minicar::motor;
+use microbit_minicar::motion::{self, MilliG, RestStatus};
+use microbit_minicar::motor::{self, Direction, Motor};
 use microbit_minicar::selftest;
 use microbit_minicar::serial_ui::{Cmd, SerialUi};
+use microbit_minicar::wheel_map;
 use panic_halt as _;
 
 const TICKS_PER_SEC: u32 = 8;
@@ -59,6 +64,14 @@ fn persist(
     }
     let _ = nvmc.erase(0, LOG_LEN as u32);
     let _ = nvmc.write(0, &ram);
+}
+
+fn erase_log(
+    nvmc: &mut microbit::hal::nvmc::Nvmc<microbit::pac::NVMC>,
+    seq: &mut Seq,
+) {
+    let _ = nvmc.erase(0, LOG_LEN as u32);
+    *seq = Seq::new();
 }
 
 fn dump_log(nvmc: &mut microbit::hal::nvmc::Nvmc<microbit::pac::NVMC>) {
@@ -91,6 +104,12 @@ fn glyph(c: u8) -> [u8; 5] {
         b':' => [0b00000, 0b00100, 0b00000, 0b00100, 0b00000],
         b'/' => [0b00001, 0b00010, 0b00100, 0b01000, 0b10000],
         b'U' => [0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
+        b'L' => [0b10000, 0b10000, 0b10000, 0b10000, 0b11111],
+        b'R' => [0b11110, 0b10001, 0b11110, 0b10100, 0b10010],
+        b'A' => [0b01110, 0b10001, 0b11111, 0b10001, 0b10001],
+        b'B' => [0b11110, 0b10001, 0b11110, 0b10001, 0b11110],
+        b'N' => [0b10001, 0b11001, 0b10101, 0b10011, 0b10001],
+        b'X' => [0b10001, 0b01010, 0b00100, 0b01010, 0b10001],
         b' ' => [0, 0, 0, 0, 0],
         _ => [0b11111, 0b10001, 0b10001, 0b10001, 0b11111],
     }
@@ -136,9 +155,11 @@ fn menu() {
          5 LED count 1-9 (display test)\r\n\
          6 show RTC (unix + msec)\r\n\
          7 clear RTC to 000000 msec\r\n\
+         8 erase flash log (NVM)\r\n\
+         9 wheel map (accel + short motor pulses; car on floor)\r\n\
          ? menu\r\n\
          (while debug ON, any key except T= stops debug and shows this menu)\r\n\
-         (keys 1-7 and ? need no Enter)\r\n"
+         (keys 1-9 and ? need no Enter; Button B = wheel map, no USB)\r\n"
     );
 }
 
@@ -179,10 +200,31 @@ fn main() -> ! {
         board.i2c_external.into(),
         twim::Frequency::K100,
     );
+    board.TWI1.enable.write(|w| w.enable().disabled());
+    board.SPI1.enable.write(|w| w.enable().disabled());
+    board.SPIS1.enable.write(|w| w.enable().disabled());
+    let i2c_int = Twim::new(
+        unsafe { microbit::pac::Peripherals::steal() }.TWIM1,
+        board.i2c_internal.into(),
+        twim::Frequency::K100,
+    );
     let mut button_a = board.buttons.button_a.into_floating_input();
+    let mut button_b = board.buttons.button_b.into_floating_input();
 
     let _ = motor::stop(&mut i2c);
     let _ = led::disable(&mut i2c);
+
+    timer.delay_ms(20);
+    let mut sensor = Lsm303agr::new_with_i2c(i2c_int);
+    let init_ok = sensor.init().is_ok();
+    let odr_ok = sensor
+        .set_accel_mode_and_odr(&mut timer, AccelMode::Normal, AccelOutputDataRate::Hz50)
+        .is_ok();
+    let id_ok = sensor
+        .accelerometer_id()
+        .map(|id| id.is_correct())
+        .unwrap_or(false);
+    let imu_ok = hw_bus::imu_ready(init_ok, odr_ok, id_ok);
 
     let mut wall = WallClock::new_unset(TICKS_PER_SEC);
     let mut seq = Seq::new();
@@ -209,7 +251,7 @@ fn main() -> ! {
                 let _ = write!(uart_irq::writer(), "{}", c as char);
             }
             if let Some(cmd) = ui.push_byte(c) {
-                apply_cmd(
+                handle_cmd(
                     cmd,
                     &mut display,
                     &mut timer,
@@ -220,6 +262,9 @@ fn main() -> ! {
                     last_rx,
                     ticks,
                     &ui,
+                    &mut i2c,
+                    &mut sensor,
+                    imu_ok,
                 );
             }
         }
@@ -230,6 +275,17 @@ fn main() -> ! {
                 dump_log(&mut nvmc);
             }
             show_glyph(&mut display, &mut timer, b'0' + n, 600);
+        } else if button_b.is_low().unwrap_or(false) {
+            run_wheel_cal(
+                &mut i2c,
+                &mut sensor,
+                imu_ok,
+                &mut display,
+                &mut timer,
+                &mut nvmc,
+                &mut seq,
+                rtc.get_counter(),
+            );
         }
 
         if ui.debug_on && n_rx == 0 {
@@ -254,7 +310,7 @@ fn main() -> ! {
                     while let Some(c) = uart_irq::read_byte() {
                         last_rx = c;
                         if let Some(cmd) = ui.push_byte(c) {
-                            apply_cmd(
+                            handle_cmd(
                                 cmd,
                                 &mut display,
                                 &mut timer,
@@ -265,6 +321,9 @@ fn main() -> ! {
                                 last_rx,
                                 rtc.get_counter(),
                                 &ui,
+                                &mut i2c,
+                                &mut sensor,
+                                imu_ok,
                             );
                         }
                     }
@@ -276,6 +335,182 @@ fn main() -> ! {
             }
         }
     }
+}
+
+fn handle_cmd<I2C, I2Ci, E, Ei>(
+    cmd: Cmd,
+    display: &mut Display,
+    timer: &mut Timer<microbit::hal::pac::TIMER0>,
+    wall: &mut WallClock,
+    now_ticks: u32,
+    nvmc: &mut microbit::hal::nvmc::Nvmc<microbit::pac::NVMC>,
+    seq: &mut Seq,
+    last_rx: u8,
+    ticks: u32,
+    ui: &SerialUi,
+    i2c: &mut I2C,
+    sensor: &mut Lsm303agr<lsm303agr::interface::I2cInterface<I2Ci>, MagOneShot>,
+    imu_ok: bool,
+) where
+    I2C: embedded_hal::i2c::I2c<Error = E>,
+    I2Ci: embedded_hal::i2c::I2c<Error = Ei>,
+{
+    if cmd == Cmd::WheelCal {
+        run_wheel_cal(
+            i2c, sensor, imu_ok, display, timer, nvmc, seq, now_ticks,
+        );
+        return;
+    }
+    apply_cmd(
+        cmd, display, timer, wall, now_ticks, nvmc, seq, last_rx, ticks, ui,
+    );
+}
+
+fn read_mg<I2C, E>(
+    sensor: &mut Lsm303agr<lsm303agr::interface::I2cInterface<I2C>, MagOneShot>,
+) -> Option<MilliG>
+where
+    I2C: embedded_hal::i2c::I2c<Error = E>,
+{
+    if !sensor.accel_status().ok()?.xyz_new_data() {
+        return None;
+    }
+    let a = sensor.acceleration().ok()?;
+    Some(MilliG::new(a.x_mg(), a.y_mg(), a.z_mg()))
+}
+
+fn sample_rest<I2C, E, D>(
+    sensor: &mut Lsm303agr<lsm303agr::interface::I2cInterface<I2C>, MagOneShot>,
+    delay: &mut D,
+) -> RestStatus
+where
+    I2C: embedded_hal::i2c::I2c<Error = E>,
+    D: DelayNs,
+{
+    let mut buf = [MilliG::new(0, 0, 0); 8];
+    let mut n = 0;
+    for _ in 0..40 {
+        if let Some(s) = read_mg(sensor) {
+            if n < buf.len() {
+                buf[n] = s;
+                n += 1;
+            } else {
+                buf.copy_within(1.., 0);
+                buf[7] = s;
+            }
+        }
+        delay.delay_ms(20);
+    }
+    motion::rest_status(&buf[..n.min(8)])
+}
+
+fn wait_sample<I2C, E, D>(
+    sensor: &mut Lsm303agr<lsm303agr::interface::I2cInterface<I2C>, MagOneShot>,
+    delay: &mut D,
+) -> MilliG
+where
+    I2C: embedded_hal::i2c::I2c<Error = E>,
+    D: DelayNs,
+{
+    for _ in 0..50 {
+        if let Some(s) = read_mg(sensor) {
+            return s;
+        }
+        delay.delay_ms(10);
+    }
+    MilliG::new(0, 0, 0)
+}
+
+fn pulse_one<I2C, E, I2Ci, Ei, D>(
+    i2c: &mut I2C,
+    sensor: &mut Lsm303agr<lsm303agr::interface::I2cInterface<I2Ci>, MagOneShot>,
+    delay: &mut D,
+    which: Motor,
+) -> (microbit_minicar::motion::ChassisMotion, u32, Option<u16>)
+where
+    I2C: embedded_hal::i2c::I2c<Error = E>,
+    I2Ci: embedded_hal::i2c::I2c<Error = Ei>,
+    D: DelayNs,
+{
+    let before = wait_sample(sensor, delay);
+    let _ = motor::set(i2c, wheel_map::PULSE_SPEED, which, Direction::Forward);
+    delay.delay_ms(wheel_map::PULSE_MS);
+    let _ = motor::stop(i2c);
+    delay.delay_ms(50);
+    let after = wait_sample(sensor, delay);
+    let (kind, mag) = motion::classify_delta(before, after);
+    let deg = wheel_map::heading_deg(after.x - before.x, after.y - before.y);
+    (kind, mag, deg)
+}
+
+fn run_wheel_cal<I2C, I2Ci, E, Ei>(
+    i2c: &mut I2C,
+    sensor: &mut Lsm303agr<lsm303agr::interface::I2cInterface<I2Ci>, MagOneShot>,
+    imu_ok: bool,
+    display: &mut Display,
+    timer: &mut Timer<microbit::hal::pac::TIMER0>,
+    nvmc: &mut microbit::hal::nvmc::Nvmc<microbit::pac::NVMC>,
+    seq: &mut Seq,
+    now_ticks: u32,
+) where
+    I2C: embedded_hal::i2c::I2c<Error = E>,
+    I2Ci: embedded_hal::i2c::I2c<Error = Ei>,
+{
+    let mut w = uart_irq::writer();
+    let _ = motor::stop(i2c);
+    if !imu_ok {
+        let _ = write!(w, "WHEEL imu fail\r\n");
+        show_glyph(display, timer, b'X', 600);
+        return;
+    }
+    show_glyph(display, timer, b'A', 200);
+    match sample_rest(sensor, timer) {
+        RestStatus::Ready => {}
+        other => {
+            let _ = write!(w, "WHEEL not ready {:?}\r\n", other);
+            persist(
+                nvmc,
+                &seq.emit(EventKind::RestBlocked, 0, now_ticks, 0, 0, 0),
+            );
+            show_glyph(display, timer, b'N', 600);
+            return;
+        }
+    }
+    persist(
+        nvmc,
+        &seq.emit(EventKind::RestReady, 0, now_ticks, 0, 0, 0),
+    );
+    let (kind_a, mag_a, deg_a) = pulse_one(i2c, sensor, timer, Motor::A);
+    timer.delay_ms(500);
+    if sample_rest(sensor, timer) != RestStatus::Ready {
+        let _ = motor::stop(i2c);
+        let _ = write!(w, "WHEEL not ready for B\r\n");
+        show_glyph(display, timer, b'N', 600);
+        return;
+    }
+    let (kind_b, mag_b, deg_b) = pulse_one(i2c, sensor, timer, Motor::B);
+    let layout = wheel_map::infer(kind_a, mag_a, kind_b, mag_b, 0);
+    let (px, py, pz) = wheel_map::pack_log(layout, deg_a, deg_b);
+    persist(
+        nvmc,
+        &seq.emit(
+            EventKind::WheelMap,
+            0,
+            now_ticks,
+            i32::from(px),
+            i32::from(py),
+            i32::from(pz),
+        ),
+    );
+    let _ = write!(
+        w,
+        "WHEEL A={:?}/{:?} deg={:?} B={:?}/{:?} deg={:?}\r\n",
+        kind_a, layout.motor_a, deg_a, kind_b, layout.motor_b, deg_b
+    );
+    show_glyph(display, timer, b'A', 250);
+    show_glyph(display, timer, layout.motor_a.glyph(), 500);
+    show_glyph(display, timer, b'B', 250);
+    show_glyph(display, timer, layout.motor_b.glyph(), 500);
 }
 
 fn apply_cmd(
@@ -351,6 +586,12 @@ fn apply_cmd(
             let _ = write!(w, "RTC cleared msec=000000\r\n");
             show_glyph(display, timer, b'0', 400);
         }
+        Cmd::ClearLog => {
+            erase_log(nvmc, seq);
+            let _ = write!(w, "LOG cleared\r\n");
+            show_glyph(display, timer, b'0', 400);
+        }
+        Cmd::WheelCal => {}
         Cmd::Menu => menu(),
     }
 }

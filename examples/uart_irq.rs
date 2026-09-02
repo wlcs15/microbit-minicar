@@ -11,7 +11,7 @@ use microbit::pac::{self, UARTE0};
 use microbit_minicar::ring::Ring;
 
 const RX_N: usize = 64;
-const TX_N: usize = 512;
+const TX_N: usize = 1024;
 const DMA_TX: usize = 16;
 
 static RX: Mutex<RefCell<Ring<RX_N>>> = Mutex::new(RefCell::new(Ring::new()));
@@ -109,6 +109,22 @@ pub fn write_str(s: &str) -> usize {
     write_bytes(s.as_bytes())
 }
 
+/// True while the TX ring or DMA still has bytes to send.
+pub fn tx_pending() -> bool {
+    if TX_BUSY.load(Ordering::SeqCst) {
+        return true;
+    }
+    free(|cs| !TX.borrow(cs).borrow().is_empty())
+}
+
+/// Block until the TX ring has drained (IRQ still runs).
+pub fn flush_tx() {
+    kick_tx();
+    while tx_pending() {
+        cortex_m::asm::nop();
+    }
+}
+
 pub fn read_byte() -> Option<u8> {
     free(|cs| RX.borrow(cs).borrow_mut().pop())
 }
@@ -152,6 +168,9 @@ pub struct Writer;
 impl core::fmt::Write for Writer {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         write_str(s);
+        if s.contains('\n') {
+            flush_tx();
+        }
         Ok(())
     }
 }

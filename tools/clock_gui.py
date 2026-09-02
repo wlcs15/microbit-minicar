@@ -44,6 +44,14 @@ def encode_clear_rtc() -> bytes:
     return b"?7"
 
 
+def encode_clear_log() -> bytes:
+    return b"?8"
+
+
+def encode_wheel_cal() -> bytes:
+    return b"?9"
+
+
 def open_serial(port: str, baud: int = 115200) -> serial.Serial:
     s = serial.Serial()
     s.port = port
@@ -98,6 +106,8 @@ class ClockGui(tk.Tk):
         ttk.Button(btns, text="Dump flash log", command=self._dump).pack(side=tk.LEFT, padx=8)
         ttk.Button(btns, text="Show RTC (6)", command=self._show_rtc).pack(side=tk.LEFT, padx=4)
         ttk.Button(btns, text="Clear RTC (7)", command=self._clear_rtc).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btns, text="Clear log (8)", command=self._clear_log).pack(side=tk.LEFT, padx=4)
+        ttk.Button(btns, text="Wheel map (9)", command=self._wheel_cal).pack(side=tk.LEFT, padx=4)
 
         self.log = tk.Text(self, height=18)
         self.log.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
@@ -198,6 +208,20 @@ class ClockGui(tk.Tk):
             return
         self.ser.write(encode_clear_rtc())
         self._note("sent ?7 (clear RTC)")
+
+    def _clear_log(self) -> None:
+        if self.ser is None:
+            messagebox.showinfo("Serial", "Open the port first")
+            return
+        self.ser.write(encode_clear_log())
+        self._note("sent ?8 (erase flash log)")
+
+    def _wheel_cal(self) -> None:
+        if self.ser is None:
+            messagebox.showinfo("Serial", "Open the port first")
+            return
+        self.ser.write(encode_wheel_cal())
+        self._note("sent ?9 (wheel map pulses — car on floor)")
 
 
 if __name__ == "__main__":

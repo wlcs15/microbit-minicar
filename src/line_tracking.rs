@@ -32,3 +32,60 @@ where
         _ => LineTrackingSensor::None,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::convert::Infallible;
+    use embedded_hal::digital::ErrorType;
+
+    struct StubPin {
+        high: bool,
+    }
+
+    impl ErrorType for StubPin {
+        type Error = Infallible;
+    }
+
+    impl InputPin for StubPin {
+        fn is_high(&mut self) -> Result<bool, Self::Error> {
+            Ok(self.high)
+        }
+
+        fn is_low(&mut self) -> Result<bool, Self::Error> {
+            Ok(!self.is_high()?)
+        }
+    }
+
+    fn pin(high: bool) -> StubPin {
+        StubPin { high }
+    }
+
+    #[test]
+    fn both_low_is_both_on_line() {
+        let mut l = pin(false);
+        let mut r = pin(false);
+        assert_eq!(read(&mut l, &mut r).unwrap(), LineTrackingSensor::Both);
+    }
+
+    #[test]
+    fn left_high_right_low_is_left() {
+        let mut l = pin(true);
+        let mut r = pin(false);
+        assert_eq!(read(&mut l, &mut r).unwrap(), LineTrackingSensor::Left);
+    }
+
+    #[test]
+    fn left_low_right_high_is_right() {
+        let mut l = pin(false);
+        let mut r = pin(true);
+        assert_eq!(read(&mut l, &mut r).unwrap(), LineTrackingSensor::Right);
+    }
+
+    #[test]
+    fn both_high_is_none() {
+        let mut l = pin(true);
+        let mut r = pin(true);
+        assert_eq!(read(&mut l, &mut r).unwrap(), LineTrackingSensor::None);
+    }
+}

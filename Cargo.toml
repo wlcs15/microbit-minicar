@@ -2,11 +2,11 @@
 name = "microbit-minicar"
 version = "0.1.1"
 edition = "2024"
-description = "Reusable Rust drivers and examples for the Keyestudio MiniCar on BBC micro:bit v2"
-repository = "https://github.com/crabstars/microbit-minicar"
+description = "Reusable Rust drivers and examples for the HolaSmart HS1002 car on BBC micro:bit v2"
+repository = "https://github.com/wlcs15/microbit-minicar"
 readme = "README.md"
 license = "CC0-1.0"
-keywords = ["embedded", "microbit", "robot", "minicar", "no-std"]
+keywords = ["embedded", "microbit", "robot", "hs1002", "no-std"]
 categories = ["embedded", "no-std"]
 include = [
     "/.cargo/config.toml",
@@ -17,6 +17,7 @@ include = [
     "/memory.x",
     "/examples/*.rs",
     "/src/**/*.rs",
+    "/utils/*.sh",
 ]
 
 [lib]
@@ -24,12 +25,18 @@ name = "microbit_minicar"
 path = "src/lib.rs"
 
 [dependencies]
+embedded-hal = "1.0.0"
+
+[dev-dependencies]
 cortex-m = { version = "0.7.7", features = ["critical-section-single-core"] }
 cortex-m-rt = "0.7.5"
 critical-section-lock-mut = "0.1.2"
-embedded-hal = "1.0.0"
-heapless = "0.9.2"
+embedded-hal-mock = { version = "0.11.1", default-features = false, features = ["eh1"] }
+lsm303agr = "1.1.0"
 microbit-v2 = "0.16.0"
 nrf52833-hal = "0.19.0"
 panic-halt = "1.0.0"
 rtt-target = "0.6.2"
+
+[lints.clippy]
+cognitive_complexity = "warn"

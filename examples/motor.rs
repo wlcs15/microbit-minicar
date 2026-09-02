@@ -31,13 +31,21 @@ fn main() -> ! {
     let _ = motor::stop(&mut i2c);
 
     loop {
-        let _ = motor::set(&mut i2c, 90, Motor::A, Direction::Forward);
-        let _ = motor::set(&mut i2c, 90, Motor::B, Direction::Forward);
-        timer.delay_ms(1_500);
+        let _ = motor::set(&mut i2c, 200, Motor::A, Direction::Forward);
+        let _ = motor::set(&mut i2c, 200, Motor::B, Direction::Forward);
+        timer.delay_ms(2_000);
 
-        let _ = motor::set(&mut i2c, 90, Motor::A, Direction::Backward);
-        let _ = motor::set(&mut i2c, 90, Motor::B, Direction::Backward);
-        timer.delay_ms(1_500);
+        let _ = motor::set(&mut i2c, 200, Motor::A, Direction::Backward);
+        let _ = motor::set(&mut i2c, 200, Motor::B, Direction::Backward);
+        timer.delay_ms(2_000);
+
+        let _ = motor::set(&mut i2c, 200, Motor::A, Direction::Backward);
+        let _ = motor::set(&mut i2c, 200, Motor::B, Direction::Forward);
+        timer.delay_ms(2_000);
+
+        let _ = motor::set(&mut i2c, 200, Motor::A, Direction::Forward);
+        let _ = motor::set(&mut i2c, 200, Motor::B, Direction::Backward);
+        timer.delay_ms(2_000);
 
         let _ = motor::stop(&mut i2c);
         timer.delay_ms(1_000);

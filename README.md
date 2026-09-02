@@ -4,6 +4,21 @@ Rust drivers and examples for the **HolaSmart HS1002** car on a BBC **micro:bit 
 
 This is the **wlcs15** fork (`https://github.com/wlcs15/microbit-minicar`). Keyestudio MiniCar motor encoding is not kept. Branch for this port: `holasmart_HS1002`. Current tag: **v1.00**. Oval line-follow verified CW and CCW; Button B stops.
 
+**Paused 02/09/2026** until credits renew (after Saturday). Flashed: `line_follow`. Do not flash `examples/motor.rs`.
+
+### Next after Saturday (Keyestudio MiniCar features still open on HS1002)
+
+| | Option |
+|---|---|
+| **A** | **RGB LEDs** on the PWM expander (status: follow / obstacle / stop) |
+| **B** | **IR remote** (kit remote start/stop/steer) |
+| **C** | **Ultrasonic while following** — already &lt;12 cm halt; tune distance / “slow then stop” |
+| **D** | **Use flash WheelMap** so follow uses calibrated left/right (A was Left, B Unknown) |
+| **E** | **Speaker / tones** (micro:bit v2; not MiniCar PCB) |
+| **F** | **LCD1602** — MiniCar had it; **dropped** for HS1002 (skip unless you want I2C display) |
+
+Prefer **A** or **D** as the next small step; **B** is the remaining kit control path.
+
 ## What this crate gives you
 
 - Motor control (HS1002 PWM expander at I2C `0x30`)

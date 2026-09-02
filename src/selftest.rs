@@ -12,7 +12,8 @@ use crate::clock::{
 use crate::led::{color_to_pwm, LedColor};
 use crate::line_tracking::{self, LineTrackingSensor};
 use crate::log_store::{
-    append, clear, decode, encode, next_slot, EventKind, LogRecord, PAGE_SIZE, RECORD_SIZE,
+    append, clear, decode, encode, latest_wheel_map, next_slot, EventKind, LogRecord, PAGE_SIZE,
+    RECORD_SIZE,
 };
 use crate::motion::{self, ChassisMotion, MilliG, RestStatus};
 use crate::motor::{self, Direction, Motor};
@@ -256,6 +257,24 @@ pub fn run_all(out: &mut impl FnMut(&str, bool)) -> Report {
         &mut rep,
         "twim1_conflicts",
         hw_bus::TWIM1_CONFLICTS.len() == 3 && hw_bus::motors_on_twim0(),
+        out,
+    );
+    check_eq(
+        &mut rep,
+        "yaw_wrap",
+        wheel_map::yaw_delta_cw(350, 10) == 20,
+        out,
+    );
+    check_eq(
+        &mut rep,
+        "latest_map",
+        {
+            let mut a = [0xFFu8; PAGE_SIZE];
+            let mut r = rec;
+            r.kind = EventKind::WheelMap;
+            let _ = append(&mut a, &r);
+            latest_wheel_map(&a).map(|x| x.kind) == Some(EventKind::WheelMap)
+        },
         out,
     );
 

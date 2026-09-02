@@ -2,7 +2,7 @@
 
 Rust drivers and examples for the **HolaSmart HS1002** car on a BBC **micro:bit v2**.
 
-This is the **wlcs15** fork (`https://github.com/wlcs15/microbit-minicar`). Keyestudio MiniCar motor encoding is not kept. Branch for this port: `holasmart_HS1002`. Current tag: **v0.05**.
+This is the **wlcs15** fork (`https://github.com/wlcs15/microbit-minicar`). Keyestudio MiniCar motor encoding is not kept. Branch for this port: `holasmart_HS1002`. Current tag: **v0.05** (+ mag 360 cal in tree).
 
 ## What this crate gives you
 
@@ -219,7 +219,7 @@ python3 tools/clock_gui.py   # Open /dev/ttyACM1, not ACM0 (Pi debug probe)
 Do **not** flash `motor` until mapping is done. It is a continuous drive loop and drains AAAs.
 
 1. `clock_idle` — daily: clock, log, menu. Menu `9` is USB debug for wheel map.
-2. `wheel_cal` — **floor calibration image** (Button A starts; Button B N/NE vs degrees). Flash this for motor↔wheel mapping without USB.
+2. `wheel_cal` — **floor calibration**. Button A: map motors, then **spin 360° CW and CCW** using the LSM303AGR **magnetometer**. Button B: N/NE vs degrees. Mapping + yaw are stored in **on-chip flash** (`0x0007E000`); the **latest `WheelMap` / `Yaw360` records** are the live values for **this** board. Re-run A on a different car/motors to overwrite-by-append (or menu `8` on `clock_idle` to erase the log first).
 3. `led_color_set` — I2C RGB, motors stopped
 4. `accel_motor_map` — older RTT pulse helper
 5. `motor_spin` — one motor at a time

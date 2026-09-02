@@ -19,7 +19,7 @@ use embedded_hal::delay::DelayNs;
 use embedded_hal::digital::InputPin;
 use embedded_storage::nor_flash::{NorFlash, ReadNorFlash};
 use lsm303agr::mode::MagOneShot;
-use lsm303agr::{AccelMode, AccelOutputDataRate, Lsm303agr};
+use lsm303agr::{AccelMode, AccelOutputDataRate, Lsm303agr, MagMode, MagOutputDataRate};
 use microbit::{
     display::blocking::Display,
     hal::{
@@ -228,6 +228,66 @@ where
     MilliG::new(0, 0, 0)
 }
 
+fn read_mag_heading<I2C, E, D>(
+    sensor: &mut Lsm303agr<lsm303agr::interface::I2cInterface<I2C>, MagOneShot>,
+    delay: &mut D,
+) -> Option<u16>
+where
+    I2C: embedded_hal::i2c::I2c<Error = E>,
+    D: DelayNs,
+{
+    for _ in 0..30 {
+        if let Ok(f) = sensor.magnetic_field() {
+            return wheel_map::heading_deg(f.x_nt(), f.y_nt());
+        }
+        delay.delay_ms(15);
+    }
+    None
+}
+
+fn yaw_spin<I2C, I2Ci, E, Ei, D>(
+    i2c: &mut I2C,
+    sensor: &mut Lsm303agr<lsm303agr::interface::I2cInterface<I2Ci>, MagOneShot>,
+    delay: &mut D,
+    layout: MotorLayout,
+    clockwise: bool,
+) -> u16
+where
+    I2C: embedded_hal::i2c::I2c<Error = E>,
+    I2Ci: embedded_hal::i2c::I2c<Error = Ei>,
+    D: DelayNs,
+{
+    let start = read_mag_heading(sensor, delay);
+    let (da, db) = wheel_map::spin_dirs(layout, clockwise);
+    let _ = motor::set(i2c, wheel_map::SPIN_SPEED, Motor::A, da);
+    let _ = motor::set(i2c, wheel_map::SPIN_SPEED, Motor::B, db);
+    let mut best = 0u16;
+    let mut t = 0u32;
+    while t < wheel_map::SPIN_TIMEOUT_MS {
+        delay.delay_ms(50);
+        t += 50;
+        if let Some(h) = read_mag_heading(sensor, delay) {
+            if let Some(s) = start {
+                let d = if clockwise {
+                    wheel_map::yaw_delta_cw(s, h)
+                } else {
+                    wheel_map::yaw_delta_ccw(s, h)
+                };
+                if d > best {
+                    best = d;
+                }
+                if d >= wheel_map::YAW_TARGET_DEG {
+                    break;
+                }
+            }
+        } else if t >= 4000 {
+            break;
+        }
+    }
+    let _ = motor::stop(i2c);
+    best
+}
+
 fn wait_a_released<Btn, D>(btn: &mut Btn, delay: &mut D)
 where
     Btn: InputPin,
@@ -397,10 +457,33 @@ fn main() -> ! {
             &mut nvmc,
             &seq.emit(EventKind::WheelMap, 0, 0, i32::from(px), i32::from(py), i32::from(pz)),
         );
+        let _ = sensor.set_mag_mode_and_odr(
+            &mut timer,
+            MagMode::HighResolution,
+            MagOutputDataRate::Hz50,
+        );
+        show_glyph(&mut display, &mut timer, b'C', 200);
+        let cw = yaw_spin(&mut i2c, &mut sensor, &mut timer, layout, true);
+        timer.delay_ms(500);
+        show_glyph(&mut display, &mut timer, b'3', 200);
+        let ccw = yaw_spin(&mut i2c, &mut sensor, &mut timer, layout, false);
+        persist(
+            &mut nvmc,
+            &seq.emit(
+                EventKind::Yaw360,
+                0,
+                0,
+                i32::from(cw),
+                i32::from(ccw),
+                i32::from(
+                    cw >= wheel_map::YAW_TARGET_DEG && ccw >= wheel_map::YAW_TARGET_DEG,
+                ),
+            ),
+        );
         let _ = write!(
             w,
-            "WHEEL A={:?} deg={:?} B={:?} deg={:?} La={:?} Lb={:?}\r\n",
-            kind_a, deg_a, kind_b, deg_b, layout.motor_a, layout.motor_b
+            "WHEEL A={:?} deg={:?} B={:?} deg={:?} La={:?} Lb={:?} yaw_cw={} ccw={}\r\n",
+            kind_a, deg_a, kind_b, deg_b, layout.motor_a, layout.motor_b, cw, ccw
         );
         let view = PulseView {
             layout,

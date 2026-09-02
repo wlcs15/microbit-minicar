@@ -93,6 +93,36 @@ pub fn infer(
 
 pub const PULSE_SPEED: u8 = 140;
 pub const PULSE_MS: u32 = 350;
+pub const SPIN_SPEED: u8 = 110;
+/// Mag yaw target for a full turn (allow a little short of 360).
+pub const YAW_TARGET_DEG: u16 = 330;
+pub const SPIN_TIMEOUT_MS: u32 = 12_000;
+
+/// Clockwise degrees from `from` to `to` in 0..359.
+pub fn yaw_delta_cw(from: u16, to: u16) -> u16 {
+    (to + 360 - from) % 360
+}
+
+pub fn yaw_delta_ccw(from: u16, to: u16) -> u16 {
+    (from + 360 - to) % 360
+}
+
+/// In-place spin: left/right dirs for clockwise (`true`) or CCW.
+/// Returns `(dir_a, dir_b)`. Unknown layout uses A=left, B=right.
+pub fn spin_dirs(layout: MotorLayout, clockwise: bool) -> (crate::motor::Direction, crate::motor::Direction) {
+    use crate::motor::Direction::{Backward, Forward};
+    let a_is_left = layout.motor_a != WheelSide::Right;
+    let (left, right) = if clockwise {
+        (Backward, Forward)
+    } else {
+        (Forward, Backward)
+    };
+    if a_is_left {
+        (left, right)
+    } else {
+        (right, left)
+    }
+}
 
 /// `tan(0..=45°)` × 10000.
 const TAN_X10000: [u16; 46] = [
@@ -270,5 +300,25 @@ mod tests {
         let (x2, y2, _) = pack_log(MotorLayout::unknown(), None, None);
         assert_eq!(x2, -1);
         assert_eq!(y2, -1);
+    }
+
+    #[test]
+    fn yaw_wraps_through_zero() {
+        assert_eq!(yaw_delta_cw(350, 10), 20);
+        assert_eq!(yaw_delta_ccw(10, 350), 20);
+        assert_eq!(yaw_delta_cw(0, 180), 180);
+        assert!(yaw_delta_cw(0, 0) < YAW_TARGET_DEG);
+    }
+
+    #[test]
+    fn spin_dirs_opposite_wheels() {
+        use crate::motor::Direction::{Backward, Forward};
+        let m = infer(ChassisMotion::PosX, 200, ChassisMotion::NegX, 180, 60);
+        let (a, b) = spin_dirs(m, true);
+        assert_ne!(a, b);
+        let (a2, b2) = spin_dirs(m, false);
+        assert_eq!(a, b2);
+        assert_eq!(b, a2);
+        let _ = (Forward, Backward);
     }
 }

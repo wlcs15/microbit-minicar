@@ -21,6 +21,8 @@ pub enum EventKind {
     Note = 6,
     /// Motor A/B → left/right from a chassis pulse (`x`/`y` = [`crate::wheel_map::WheelSide`]).
     WheelMap = 7,
+    /// Mag 360° spin: x=CW deg, y=CCW deg, z=1 if both hit target.
+    Yaw360 = 8,
 }
 
 impl EventKind {
@@ -33,6 +35,7 @@ impl EventKind {
             5 => Some(Self::ChassisDelta),
             6 => Some(Self::Note),
             7 => Some(Self::WheelMap),
+            8 => Some(Self::Yaw360),
             _ => None,
         }
     }
@@ -180,6 +183,11 @@ pub fn iter_valid(area: &[u8]) -> impl Iterator<Item = LogRecord> + '_ {
     area.as_chunks::<RECORD_SIZE>().0.iter().filter_map(decode)
 }
 
+/// Latest wheel map in the log (re-run cal on new hardware; this is the live set).
+pub fn latest_wheel_map(area: &[u8]) -> Option<LogRecord> {
+    iter_valid(area).filter(|r| r.kind == EventKind::WheelMap).last()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,6 +221,7 @@ mod tests {
             EventKind::ChassisDelta,
             EventKind::Note,
             EventKind::WheelMap,
+            EventKind::Yaw360,
         ] {
             let mut r = rec(1);
             r.kind = k;
@@ -239,6 +248,7 @@ mod tests {
         assert_eq!(EventKind::from_u8(1), Some(EventKind::ClockSet));
         assert_eq!(EventKind::from_u8(6), Some(EventKind::Note));
         assert_eq!(EventKind::from_u8(7), Some(EventKind::WheelMap));
+        assert_eq!(EventKind::from_u8(8), Some(EventKind::Yaw360));
         assert_eq!(EventKind::from_u8(0), None);
         assert_eq!(EventKind::from_u8(99), None);
     }
@@ -287,5 +297,21 @@ mod tests {
         clear(&mut area);
         assert_eq!(iter_valid(&area).count(), 0);
         assert_eq!(next_slot(&area), Some(0));
+    }
+
+    #[test]
+    fn latest_wheel_map_is_last_record() {
+        let mut area = [0xFFu8; PAGE_SIZE];
+        let mut a = rec(1);
+        a.kind = EventKind::WheelMap;
+        a.x = 1;
+        append(&mut area, &a).unwrap();
+        let mut b = rec(2);
+        b.kind = EventKind::WheelMap;
+        b.x = 90;
+        append(&mut area, &b).unwrap();
+        let last = latest_wheel_map(&area).unwrap();
+        assert_eq!(last.x, 90);
+        assert_eq!(last.seq, 2);
     }
 }

@@ -1,6 +1,11 @@
 [default.general]
 chip = "nRF52833_xxAA"
 
+# Prefer the micro:bit DAPLink, not the Raspberry Pi Debug Probe on the same machine.
+[default.probe]
+usb_vid = "0d28"
+usb_pid = "0204"
+
 [default.rtt]
 enabled = true
 

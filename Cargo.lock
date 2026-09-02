@@ -281,6 +281,7 @@ dependencies = [
  "critical-section-lock-mut",
  "embedded-hal 1.0.0",
  "embedded-hal-mock",
+ "embedded-storage",
  "lsm303agr",
  "microbit-v2",
  "nrf52833-hal",

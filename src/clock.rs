@@ -46,16 +46,100 @@ impl WallClock {
         let dt = now_ticks.wrapping_sub(self.origin_ticks);
         Some(origin_unix.wrapping_add(dt / tps))
     }
+
+    /// Clear wall time and restart the millisecond counter at 0.
+    pub fn clear(&mut self, now_ticks: u32) {
+        self.unix_at_origin = None;
+        self.origin_ticks = now_ticks;
+    }
+
+    pub fn msec_since(&self, now_ticks: u32) -> u32 {
+        let tps = self.ticks_per_sec.max(1);
+        let dt = now_ticks.wrapping_sub(self.origin_ticks);
+        dt.saturating_mul(1000) / tps
+    }
 }
 
-/// Parse a set-clock command `T=<unix>` (decimal, optional CR/LF).
+/// `MMDDYYYY HHMMSS` in UTC (15 bytes, no NUL).
+pub const STAMP_LEN: usize = 15;
+
+fn unix_to_ymdhms(unix: u32) -> (u16, u8, u8, u8, u8, u8) {
+    let days = i64::from(unix / 86_400);
+    let tod = unix % 86_400;
+    let hour = (tod / 3_600) as u8;
+    let min = ((tod % 3_600) / 60) as u8;
+    let sec = (tod % 60) as u8;
+    let (year, month, day) = civil_from_unix_days(days);
+    (year, month, day, hour, min, sec)
+}
+
+/// Howard Hinnant civil-from-days; `days` is days since 1970-01-01 UTC.
+fn civil_from_unix_days(days: i64) -> (u16, u8, u8) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = (y + i64::from(m <= 2)) as u16;
+    (year, m as u8, d as u8)
+}
+
+fn push_2(buf: &mut [u8], at: usize, v: u8) {
+    buf[at] = b'0' + (v / 10);
+    buf[at + 1] = b'0' + (v % 10);
+}
+
+pub fn format_mmddyyyy_hhmmss(unix: u32) -> [u8; STAMP_LEN] {
+    let (year, month, day, hour, min, sec) = unix_to_ymdhms(unix);
+    let mut buf = [b' '; STAMP_LEN];
+    push_2(&mut buf, 0, month);
+    push_2(&mut buf, 2, day);
+    buf[4] = b'0' + ((year / 1000) % 10) as u8;
+    buf[5] = b'0' + ((year / 100) % 10) as u8;
+    buf[6] = b'0' + ((year / 10) % 10) as u8;
+    buf[7] = b'0' + (year % 10) as u8;
+    buf[8] = b' ';
+    push_2(&mut buf, 9, hour);
+    push_2(&mut buf, 11, min);
+    push_2(&mut buf, 13, sec);
+    buf
+}
+
+pub fn format_mmddyyyy_hhmmss_str(unix: u32) -> [u8; STAMP_LEN] {
+    format_mmddyyyy_hhmmss(unix)
+}
+
+pub fn format_msec6(ms: u32) -> [u8; 6] {
+    let v = ms % 1_000_000;
+    let mut buf = [b'0'; 6];
+    let mut n = v;
+    for i in (0..6).rev() {
+        buf[i] = b'0' + (n % 10) as u8;
+        n /= 10;
+    }
+    buf
+}
+
+/// Reject truncated `T=` values that would display as 1970.
+pub const MIN_UNIX: u32 = 1_000_000_000;
+
+/// Parse `T=<unix>` (UTC seconds). Requires 10+ digits so a dropped
+/// `T=1` cannot become 1 Jan 1970.
 pub fn parse_set_command(line: &str) -> Option<u32> {
     let line = line.trim();
     let rest = line.strip_prefix("T=")?;
-    if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
+    if rest.len() < 10 || !rest.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
-    rest.parse().ok()
+    let n: u32 = rest.parse().ok()?;
+    if n < MIN_UNIX {
+        return None;
+    }
+    Some(n)
 }
 
 #[cfg(test)]
@@ -72,6 +156,10 @@ mod tests {
         assert_eq!(c.unix_at(16), Some(1_700_000_000));
         assert_eq!(c.unix_at(24), Some(1_700_000_001));
         assert_eq!(c.ticks_per_sec(), 8);
+        c.clear(32);
+        assert!(!c.is_set());
+        assert_eq!(c.msec_since(32), 0);
+        assert_eq!(c.msec_since(40), 1000);
     }
 
     #[test]
@@ -84,9 +172,34 @@ mod tests {
     #[test]
     fn parse_t_command() {
         assert_eq!(parse_set_command("T=1700000000\r\n"), Some(1_700_000_000));
-        assert_eq!(parse_set_command("  T=12 "), Some(12));
+        assert_eq!(parse_set_command("  T=12 "), None);
+        assert_eq!(parse_set_command("T=1000000000"), Some(1_000_000_000));
         assert_eq!(parse_set_command("T="), None);
         assert_eq!(parse_set_command("T=12a"), None);
         assert_eq!(parse_set_command("time=1"), None);
+    }
+
+    fn stamp(unix: u32) -> String {
+        let b = format_mmddyyyy_hhmmss(unix);
+        String::from_utf8(b.to_vec()).unwrap()
+    }
+
+    #[test]
+    fn formats_epoch() {
+        assert_eq!(stamp(0), "01011970 000000");
+        assert_eq!(stamp(1), "01011970 000001");
+    }
+
+    #[test]
+    fn formats_known_unix() {
+        assert_eq!(stamp(1_700_000_000), "11142023 221320");
+        assert_eq!(stamp(1_709_164_800), "02292024 000000");
+    }
+
+    #[test]
+    fn msec6_pads_and_wraps() {
+        assert_eq!(&format_msec6(0), b"000000");
+        assert_eq!(&format_msec6(1234), b"001234");
+        assert_eq!(&format_msec6(1_000_000), b"000000");
     }
 }

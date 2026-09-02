@@ -97,6 +97,9 @@ pub const SPIN_SPEED: u8 = 110;
 /// Mag yaw target for a full turn (allow a little short of 360).
 pub const YAW_TARGET_DEG: u16 = 330;
 pub const SPIN_TIMEOUT_MS: u32 = 12_000;
+/// Open-loop ~3 ft (0.9 m) at `STRAIGHT_SPEED` on a typical HS1002 floor.
+pub const STRAIGHT_MS: u32 = 3_500;
+pub const STRAIGHT_SPEED: u8 = 120;
 
 /// Clockwise degrees from `from` to `to` in 0..359.
 pub fn yaw_delta_cw(from: u16, to: u16) -> u16 {

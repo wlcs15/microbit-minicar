@@ -267,6 +267,12 @@ pub fn run_all(out: &mut impl FnMut(&str, bool)) -> Report {
     );
     check_eq(
         &mut rep,
+        "straight_ms",
+        wheel_map::STRAIGHT_MS >= 3_000 && wheel_map::STRAIGHT_SPEED > 0,
+        out,
+    );
+    check_eq(
+        &mut rep,
         "latest_map",
         {
             let mut a = [0xFFu8; PAGE_SIZE];

@@ -480,10 +480,47 @@ fn main() -> ! {
                 ),
             ),
         );
+        timer.delay_ms(400);
+        show_glyph(&mut display, &mut timer, b'S', 200);
+        let h0 = read_mag_heading(&mut sensor, &mut timer);
+        let _ = motor::set(
+            &mut i2c,
+            wheel_map::STRAIGHT_SPEED,
+            Motor::A,
+            Direction::Forward,
+        );
+        let _ = motor::set(
+            &mut i2c,
+            wheel_map::STRAIGHT_SPEED,
+            Motor::B,
+            Direction::Forward,
+        );
+        timer.delay_ms(wheel_map::STRAIGHT_MS);
+        let _ = motor::stop(&mut i2c);
+        let h1 = read_mag_heading(&mut sensor, &mut timer);
+        let drift = match (h0, h1) {
+            (Some(a), Some(b)) => {
+                let cw = wheel_map::yaw_delta_cw(a, b);
+                let ccw = wheel_map::yaw_delta_ccw(a, b);
+                if cw < ccw { cw } else { ccw }
+            }
+            _ => 0,
+        };
+        persist(
+            &mut nvmc,
+            &seq.emit(
+                EventKind::Straight,
+                0,
+                0,
+                i32::from(h0.unwrap_or(0)),
+                i32::from(h1.unwrap_or(0)),
+                i32::from(drift),
+            ),
+        );
         let _ = write!(
             w,
-            "WHEEL A={:?} deg={:?} B={:?} deg={:?} La={:?} Lb={:?} yaw_cw={} ccw={}\r\n",
-            kind_a, deg_a, kind_b, deg_b, layout.motor_a, layout.motor_b, cw, ccw
+            "WHEEL A={:?} deg={:?} B={:?} deg={:?} La={:?} Lb={:?} yaw_cw={} ccw={} straight_drift={}\r\n",
+            kind_a, deg_a, kind_b, deg_b, layout.motor_a, layout.motor_b, cw, ccw, drift
         );
         let view = PulseView {
             layout,

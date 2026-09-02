@@ -23,6 +23,8 @@ pub enum EventKind {
     WheelMap = 7,
     /// Mag 360° spin: x=CW deg, y=CCW deg, z=1 if both hit target.
     Yaw360 = 8,
+    /// Timed straight run: x=start mag°, y=end mag°, z=abs drift°.
+    Straight = 9,
 }
 
 impl EventKind {
@@ -36,6 +38,7 @@ impl EventKind {
             6 => Some(Self::Note),
             7 => Some(Self::WheelMap),
             8 => Some(Self::Yaw360),
+            9 => Some(Self::Straight),
             _ => None,
         }
     }
@@ -222,6 +225,7 @@ mod tests {
             EventKind::Note,
             EventKind::WheelMap,
             EventKind::Yaw360,
+            EventKind::Straight,
         ] {
             let mut r = rec(1);
             r.kind = k;
@@ -249,6 +253,7 @@ mod tests {
         assert_eq!(EventKind::from_u8(6), Some(EventKind::Note));
         assert_eq!(EventKind::from_u8(7), Some(EventKind::WheelMap));
         assert_eq!(EventKind::from_u8(8), Some(EventKind::Yaw360));
+        assert_eq!(EventKind::from_u8(9), Some(EventKind::Straight));
         assert_eq!(EventKind::from_u8(0), None);
         assert_eq!(EventKind::from_u8(99), None);
     }

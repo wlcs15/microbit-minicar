@@ -2,7 +2,7 @@
 
 Rust drivers and examples for the **HolaSmart HS1002** car on a BBC **micro:bit v2**.
 
-This is the **wlcs15** fork (`https://github.com/wlcs15/microbit-minicar`). Keyestudio MiniCar motor encoding is not kept. Branch for this port: `holasmart_HS1002`. Current tag: **v0.05** (+ mag 360 cal in tree).
+This is the **wlcs15** fork (`https://github.com/wlcs15/microbit-minicar`). Keyestudio MiniCar motor encoding is not kept. Branch for this port: `holasmart_HS1002`. Current tag: **v1.00**. Oval line-follow verified CW and CCW; Button B stops.
 
 ## What this crate gives you
 

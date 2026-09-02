@@ -60,8 +60,8 @@ impl WallClock {
     }
 }
 
-/// `MMDDYYYY HHMMSS` in UTC (15 bytes, no NUL).
-pub const STAMP_LEN: usize = 15;
+/// `DD/MM/YYYY HH:MM:SS` in UTC (19 bytes, no NUL).
+pub const STAMP_LEN: usize = 19;
 
 fn unix_to_ymdhms(unix: u32) -> (u16, u8, u8, u8, u8, u8) {
     let days = i64::from(unix / 86_400);
@@ -96,16 +96,20 @@ fn push_2(buf: &mut [u8], at: usize, v: u8) {
 pub fn format_mmddyyyy_hhmmss(unix: u32) -> [u8; STAMP_LEN] {
     let (year, month, day, hour, min, sec) = unix_to_ymdhms(unix);
     let mut buf = [b' '; STAMP_LEN];
-    push_2(&mut buf, 0, month);
-    push_2(&mut buf, 2, day);
-    buf[4] = b'0' + ((year / 1000) % 10) as u8;
-    buf[5] = b'0' + ((year / 100) % 10) as u8;
-    buf[6] = b'0' + ((year / 10) % 10) as u8;
-    buf[7] = b'0' + (year % 10) as u8;
-    buf[8] = b' ';
-    push_2(&mut buf, 9, hour);
-    push_2(&mut buf, 11, min);
-    push_2(&mut buf, 13, sec);
+    push_2(&mut buf, 0, day);
+    buf[2] = b'/';
+    push_2(&mut buf, 3, month);
+    buf[5] = b'/';
+    buf[6] = b'0' + ((year / 1000) % 10) as u8;
+    buf[7] = b'0' + ((year / 100) % 10) as u8;
+    buf[8] = b'0' + ((year / 10) % 10) as u8;
+    buf[9] = b'0' + (year % 10) as u8;
+    buf[10] = b' ';
+    push_2(&mut buf, 11, hour);
+    buf[13] = b':';
+    push_2(&mut buf, 14, min);
+    buf[16] = b':';
+    push_2(&mut buf, 17, sec);
     buf
 }
 
@@ -186,14 +190,14 @@ mod tests {
 
     #[test]
     fn formats_epoch() {
-        assert_eq!(stamp(0), "01011970 000000");
-        assert_eq!(stamp(1), "01011970 000001");
+        assert_eq!(stamp(0), "01/01/1970 00:00:00");
+        assert_eq!(stamp(1), "01/01/1970 00:00:01");
     }
 
     #[test]
     fn formats_known_unix() {
-        assert_eq!(stamp(1_700_000_000), "11142023 221320");
-        assert_eq!(stamp(1_709_164_800), "02292024 000000");
+        assert_eq!(stamp(1_700_000_000), "14/11/2023 22:13:20");
+        assert_eq!(stamp(1_709_164_800), "29/02/2024 00:00:00");
     }
 
     #[test]

@@ -16,11 +16,15 @@ use microbit::{
         clocks::Clocks,
         rtc::Rtc,
         twim::{self, Twim},
-        uarte::{self, Baudrate, Parity, Uarte},
+        uarte::{Baudrate, Parity},
         Timer,
     },
+    pac::interrupt,
     Board,
 };
+
+#[path = "uart_irq.rs"]
+mod uart_irq;
 use microbit_minicar::clock::{
     format_mmddyyyy_hhmmss, format_msec6, WallClock, STAMP_LEN,
 };
@@ -57,23 +61,19 @@ fn persist(
     let _ = nvmc.write(0, &ram);
 }
 
-fn dump_log<T>(
-    uart: &mut Uarte<T>,
-    nvmc: &mut microbit::hal::nvmc::Nvmc<microbit::pac::NVMC>,
-) where
-    T: uarte::Instance,
-{
+fn dump_log(nvmc: &mut microbit::hal::nvmc::Nvmc<microbit::pac::NVMC>) {
     let mut ram = [0u8; LOG_LEN];
     let _ = nvmc.read(0, &mut ram);
-    let _ = write!(uart, "LOG\r\n");
+    let mut w = uart_irq::writer();
+    let _ = write!(w, "LOG\r\n");
     for rec in iter_valid(&ram) {
         let _ = write!(
-            uart,
+            w,
             "seq={} kind={:?} unix={} ticks={} x={} y={} z={}\r\n",
             rec.seq, rec.kind, rec.unix, rec.ticks, rec.x, rec.y, rec.z
         );
     }
-    let _ = write!(uart, "END\r\n");
+    let _ = write!(w, "END\r\n");
 }
 
 fn glyph(c: u8) -> [u8; 5] {
@@ -88,6 +88,8 @@ fn glyph(c: u8) -> [u8; 5] {
         b'7' => [0b11111, 0b00001, 0b00010, 0b00100, 0b00100],
         b'8' => [0b01110, 0b10001, 0b01110, 0b10001, 0b01110],
         b'9' => [0b01110, 0b10001, 0b01111, 0b00001, 0b01110],
+        b':' => [0b00000, 0b00100, 0b00000, 0b00100, 0b00000],
+        b'/' => [0b00001, 0b00010, 0b00100, 0b01000, 0b10000],
         b'U' => [0b10001, 0b10001, 0b10001, 0b10001, 0b01110],
         b' ' => [0, 0, 0, 0, 0],
         _ => [0b11111, 0b10001, 0b10001, 0b10001, 0b11111],
@@ -121,12 +123,12 @@ fn scroll_frame<D: DelayNs>(display: &mut Display, delay: &mut D, text: &[u8], o
     display.show(delay, frame, 160);
 }
 
-fn menu<T: uarte::Instance>(uart: &mut Uarte<T>) {
-    // Marker so leftover host-side dbg is obviously cut off.
+fn menu() {
+    let mut w = uart_irq::writer();
     let _ = write!(
-        uart,
+        w,
         "\r\n---DBG OFF---\r\nMENU\r\n\
-         T=<unix>  set UTC clock\r\n\
+         T=<10-digit unix>  set UTC clock (then Enter)\r\n\
          1 status\r\n\
          2 dump flash log\r\n\
          3 start debug logging\r\n\
@@ -136,17 +138,18 @@ fn menu<T: uarte::Instance>(uart: &mut Uarte<T>) {
          7 clear RTC to 000000 msec\r\n\
          ? menu\r\n\
          (while debug ON, any key except T= stops debug and shows this menu)\r\n\
-         (T=<10-digit unix> then Enter; 1-7 and ? need no Enter)\r\n"
+         (keys 1-7 and ? need no Enter)\r\n"
     );
 }
 
-fn run_tests<T: uarte::Instance>(uart: &mut Uarte<T>) {
-    let _ = write!(uart, "SELFTEST\r\n");
+fn run_tests() {
+    let mut w = uart_irq::writer();
+    let _ = write!(w, "SELFTEST\r\n");
     let r = selftest::run_all(&mut |name, ok| {
         let mark = if ok { "PASS" } else { "FAIL" };
-        let _ = write!(uart, "{mark} {name}\r\n");
+        let _ = write!(w, "{mark} {name}\r\n");
     });
-    let _ = write!(uart, "RESULT pass={} fail={}\r\n", r.pass, r.fail);
+    let _ = write!(w, "RESULT pass={} fail={}\r\n", r.pass, r.fail);
 }
 
 fn log_count(nvmc: &mut microbit::hal::nvmc::Nvmc<microbit::pac::NVMC>) -> u8 {
@@ -160,16 +163,15 @@ fn main() -> ! {
     let board = Board::take().unwrap();
     let _clocks = Clocks::new(board.CLOCK).start_lfclk();
     let mut timer = Timer::new(board.TIMER0);
-    let mut uart_timer = Timer::new(board.TIMER1);
     let rtc = Rtc::new(board.RTC0, 4095).unwrap();
     rtc.enable_counter();
 
     let mut display = Display::new(board.display_pins);
-    let mut uart = Uarte::new(
+    uart_irq::init(
         board.UARTE0,
         board.uart.into(),
-        Parity::EXCLUDED,
         Baudrate::BAUD115200,
+        Parity::EXCLUDED,
     );
     let mut nvmc = microbit::hal::nvmc::Nvmc::new(board.NVMC, log_storage());
     let mut i2c = Twim::new(
@@ -186,34 +188,29 @@ fn main() -> ! {
     let mut seq = Seq::new();
     let mut ui = SerialUi::new();
     let mut last_rx: u8 = 0;
-    let mut dbg_div: u32 = 0;
+    let mut last_dbg_ticks: u32 = 0;
 
     persist(
         &mut nvmc,
         &seq.emit(EventKind::Note, 0, rtc.get_counter(), 1, 0, 0),
     );
     let _ = write!(
-        uart,
-        "boot clock_idle debug=ON send T=<unix> or any other key for MENU\r\n"
+        uart_irq::writer(),
+        "boot clock_idle IRQ UART debug=ON  T=<unix> or any key for MENU\r\n"
     );
 
     loop {
-        let _ = motor::stop(&mut i2c);
         let ticks = rtc.get_counter();
-
-        let mut b = [0u8; 4];
-        if uart.read_timeout(&mut b[..1], &mut uart_timer, 12_000).is_ok() {
-            let c = b[0];
+        let mut n_rx = 0u32;
+        while let Some(c) = uart_irq::read_byte() {
+            n_rx += 1;
             last_rx = c;
-            show_glyph(&mut display, &mut timer, b'U', 20);
             if c >= 32 && c < 127 {
-                let _ = write!(uart, "{}\r\n", c as char);
+                let _ = write!(uart_irq::writer(), "{}", c as char);
             }
-            let _ = write!(uart, "rx 0x{:02x}\r\n", c);
             if let Some(cmd) = ui.push_byte(c) {
                 apply_cmd(
                     cmd,
-                    &mut uart,
                     &mut display,
                     &mut timer,
                     &mut wall,
@@ -228,63 +225,61 @@ fn main() -> ! {
         }
 
         if button_a.is_low().unwrap_or(false) {
-            dump_log(&mut uart, &mut nvmc);
             let n = log_count(&mut nvmc);
-            let _ = write!(uart, "btnA log_count={}\r\n", n);
-            show_glyph(&mut display, &mut timer, b'0' + n, 300);
+            if microbit_minicar::serial_ui::button_a_prints_log(ui.debug_on) {
+                dump_log(&mut nvmc);
+            }
+            show_glyph(&mut display, &mut timer, b'0' + n, 600);
         }
 
-        if ui.debug_on {
-            dbg_div = dbg_div.wrapping_add(1);
-            if dbg_div % 24 == 0 {
+        if ui.debug_on && n_rx == 0 {
+            let dt = ticks.wrapping_sub(last_dbg_ticks);
+            if dt >= 8 {
+                last_dbg_ticks = ticks;
                 let _ = write!(
-                    uart,
-                    "dbg ticks={} set={} unix={:?} rx_n={} last=0x{:02x} dbg={}\r\n",
+                    uart_irq::writer(),
+                    "dbg t={} set={} u={:?}\r\n",
                     ticks,
                     wall.is_set() as u8,
                     wall.unix_at(ticks),
-                    ui.rx_bytes,
-                    last_rx,
-                    ui.debug_on as u8
                 );
             }
         }
 
-        if let Some(unix) = wall.unix_at(rtc.get_counter()) {
-            let stamp = format_mmddyyyy_hhmmss(unix);
-            let frames = stamp.len() * 6 + 5;
-            for origin in 0..frames {
-                let mut b = [0u8; 4];
-                if uart.read_timeout(&mut b[..1], &mut uart_timer, 8_000).is_ok() {
-                    last_rx = b[0];
-                    if let Some(cmd) = ui.push_byte(b[0]) {
-                        apply_cmd(
-                            cmd,
-                            &mut uart,
-                            &mut display,
-                            &mut timer,
-                            &mut wall,
-                            rtc.get_counter(),
-                            &mut nvmc,
-                            &mut seq,
-                            last_rx,
-                            rtc.get_counter(),
-                            &ui,
-                        );
+        if !ui.debug_on {
+            if let Some(unix) = wall.unix_at(rtc.get_counter()) {
+                let stamp = format_mmddyyyy_hhmmss(unix);
+                let frames = stamp.len() * 6 + 5;
+                for origin in 0..frames {
+                    while let Some(c) = uart_irq::read_byte() {
+                        last_rx = c;
+                        if let Some(cmd) = ui.push_byte(c) {
+                            apply_cmd(
+                                cmd,
+                                &mut display,
+                                &mut timer,
+                                &mut wall,
+                                rtc.get_counter(),
+                                &mut nvmc,
+                                &mut seq,
+                                last_rx,
+                                rtc.get_counter(),
+                                &ui,
+                            );
+                        }
                     }
+                    scroll_frame(&mut display, &mut timer, &stamp, origin);
                 }
-                scroll_frame(&mut display, &mut timer, &stamp[..STAMP_LEN], origin);
+                display.clear();
+            } else {
+                show_glyph(&mut display, &mut timer, b'T', 15);
             }
-            display.clear();
-        } else {
-            show_glyph(&mut display, &mut timer, b'T', 15);
         }
     }
 }
 
-fn apply_cmd<T>(
+fn apply_cmd(
     cmd: Cmd,
-    uart: &mut Uarte<T>,
     display: &mut Display,
     timer: &mut Timer<microbit::hal::pac::TIMER0>,
     wall: &mut WallClock,
@@ -294,9 +289,8 @@ fn apply_cmd<T>(
     last_rx: u8,
     ticks: u32,
     ui: &SerialUi,
-) where
-    T: uarte::Instance,
-{
+) {
+    let mut w = uart_irq::writer();
     match cmd {
         Cmd::SetTime(unix) => {
             wall.set(unix, now_ticks);
@@ -304,11 +298,11 @@ fn apply_cmd<T>(
                 nvmc,
                 &seq.emit(EventKind::ClockSet, unix, now_ticks, 0, 0, 0),
             );
-            let _ = write!(uart, "OK unix={} set={}\r\n", unix, wall.is_set());
+            let _ = write!(w, "OK unix={} set={}\r\n", unix, wall.is_set());
         }
         Cmd::Status => {
             let _ = write!(
-                uart,
+                w,
                 "status ticks={} set={} unix={:?} rx_n={} last=0x{:02x} logs={} dbg={}\r\n",
                 ticks,
                 wall.is_set(),
@@ -319,11 +313,11 @@ fn apply_cmd<T>(
                 ui.debug_on as u8
             );
         }
-        Cmd::Dump => dump_log(uart, nvmc),
+        Cmd::Dump => dump_log(nvmc),
         Cmd::DebugOn => {
-            let _ = write!(uart, "debug ON\r\n");
+            let _ = write!(w, "debug ON\r\n");
         }
-        Cmd::RunTests => run_tests(uart),
+        Cmd::RunTests => run_tests(),
         Cmd::LedCount => {
             for d in b'1'..=b'9' {
                 show_glyph(display, timer, d, 200);
@@ -336,37 +330,32 @@ fn apply_cmd<T>(
                 Some(u) => {
                     let stamp = format_mmddyyyy_hhmmss(u);
                     let _ = write!(
-                        uart,
+                        w,
                         "RTC unix={} stamp={} msec={}\r\n",
                         u,
                         core::str::from_utf8(&stamp).unwrap_or("?"),
                         core::str::from_utf8(&msec).unwrap_or("?")
                     );
-                    for origin in 0..(stamp.len() * 6 + 5) {
-                        scroll_frame(display, timer, &stamp[..STAMP_LEN], origin);
-                    }
                 }
                 None => {
                     let _ = write!(
-                        uart,
+                        w,
                         "RTC unset msec={}\r\n",
                         core::str::from_utf8(&msec).unwrap_or("?")
                     );
-                    for origin in 0..(6 * 6 + 5) {
-                        scroll_frame(display, timer, &msec, origin);
-                    }
                 }
             }
-            display.clear();
         }
         Cmd::ClearRtc => {
             wall.clear(now_ticks);
-            let _ = write!(uart, "RTC cleared msec=000000\r\n");
-            for origin in 0..(6 * 6 + 5) {
-                scroll_frame(display, timer, b"000000", origin);
-            }
-            display.clear();
+            let _ = write!(w, "RTC cleared msec=000000\r\n");
+            show_glyph(display, timer, b'0', 400);
         }
-        Cmd::Menu => menu(uart),
+        Cmd::Menu => menu(),
     }
+}
+
+#[interrupt]
+fn UARTE0_UART0() {
+    uart_irq::on_irq();
 }

@@ -30,6 +30,11 @@ impl Default for SerialUi {
     }
 }
 
+/// Button A may print the flash dump only while debug logging is on.
+pub const fn button_a_prints_log(debug_on: bool) -> bool {
+    debug_on
+}
+
 impl SerialUi {
     pub const fn new() -> Self {
         Self {
@@ -115,6 +120,12 @@ mod tests {
             }
         }
         last
+    }
+
+    #[test]
+    fn button_a_log_only_when_debug_on() {
+        assert!(button_a_prints_log(true));
+        assert!(!button_a_prints_log(false));
     }
 
     #[test]

@@ -116,6 +116,16 @@ class GuiEncodeTests(unittest.TestCase):
         self.assertEqual(fw.push(ord("q")), ("menu", None))
         self.assertFalse(fw.debug_on)
 
+    def test_show_and_clear_rtc_from_menu(self):
+        fw = FirmwareUi()
+        self.assertEqual(fw.push_bytes(cg.encode_show_rtc()), ("showrtc", None))
+        fw = FirmwareUi()
+        self.assertEqual(fw.push_bytes(cg.encode_clear_rtc()), ("clearrtc", None))
+        fw = FirmwareUi()
+        fw.debug_on = False
+        self.assertEqual(fw.push(ord("6")), ("showrtc", None))
+        self.assertEqual(fw.push(ord("7")), ("clearrtc", None))
+
     def test_gui_dump_and_tests_from_debug(self):
         fw = FirmwareUi()
         self.assertEqual(fw.push_bytes(cg.encode_dump()), ("dump", None))
@@ -205,6 +215,30 @@ class GuiEncodeTests(unittest.TestCase):
             os.close(master)
 
 
+    def test_burst_menu_then_command(self):
+        fw = FirmwareUi()
+        self.assertEqual(fw.push_bytes(b"?6"), ("showrtc", None))
+        fw = FirmwareUi()
+        self.assertEqual(fw.push_bytes(b"?7"), ("clearrtc", None))
+        fw = FirmwareUi()
+        self.assertEqual(fw.push_bytes(b"?4"), ("tests", None))
+        fw = FirmwareUi()
+        self.assertEqual(fw.push_bytes(b"?3"), ("debugon", None))
+        self.assertTrue(fw.debug_on)
+        self.assertEqual(fw.push(ord("x")), ("menu", None))
+
+
 if __name__ == "__main__":
-    r = unittest.main(verbosity=2, exit=False)
-    sys.exit(0 if r.result.wasSuccessful() else 1)
+    loader = unittest.TestLoader()
+    names = loader.getTestCaseNames(GuiEncodeTests)
+    failed = False
+    for seed in range(8):
+        order = names[:]
+        random.Random(seed).shuffle(order)
+        suite = unittest.TestSuite(GuiEncodeTests(n) for n in order)
+        print(f"--- shuffle seed={seed} ---")
+        r = unittest.TextTestRunner(verbosity=1).run(suite)
+        if not r.wasSuccessful():
+            failed = True
+            print("FAIL order", order)
+    sys.exit(1 if failed else 0)

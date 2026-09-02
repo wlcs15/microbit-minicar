@@ -476,8 +476,11 @@ pub fn run_all(out: &mut impl FnMut(&str, bool)) -> Report {
     check_eq(
         &mut rep,
         "follow_stop",
-        line_tracking::follow_cmd(LineTrackingSensor::Both, true)
-            == line_tracking::FollowCmd::Stop,
+        line_tracking::follow_cmd(
+            LineTrackingSensor::Both,
+            true,
+            LineTrackingSensor::None,
+        ) == line_tracking::FollowCmd::Stop,
         out,
     );
 

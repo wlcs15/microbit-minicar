@@ -42,15 +42,27 @@ pub enum FollowCmd {
 }
 
 /// Open-loop follow. `obstacle` is ultrasonic halt (no RGB/IR).
-pub fn follow_cmd(line: LineTrackingSensor, obstacle: bool) -> FollowCmd {
+///
+/// `Left` means the **left** sensor is off the line (white) — steer **right**.
+/// `last` is used to search when both sensors see white (oval corners).
+pub fn follow_cmd(
+    line: LineTrackingSensor,
+    obstacle: bool,
+    last: LineTrackingSensor,
+) -> FollowCmd {
     if obstacle {
         return FollowCmd::Stop;
     }
     match line {
         LineTrackingSensor::Both => FollowCmd::Forward,
-        LineTrackingSensor::Left => FollowCmd::SteerLeft,
-        LineTrackingSensor::Right => FollowCmd::SteerRight,
-        LineTrackingSensor::None => FollowCmd::Stop,
+        LineTrackingSensor::Left => FollowCmd::SteerRight,
+        LineTrackingSensor::Right => FollowCmd::SteerLeft,
+        LineTrackingSensor::None => match last {
+            LineTrackingSensor::Left => FollowCmd::SteerRight,
+            LineTrackingSensor::Right => FollowCmd::SteerLeft,
+            LineTrackingSensor::Both => FollowCmd::SteerRight,
+            LineTrackingSensor::None => FollowCmd::Stop,
+        },
     }
 }
 
@@ -112,10 +124,24 @@ mod tests {
 
     #[test]
     fn follow_stops_on_obstacle_or_none() {
-        assert_eq!(follow_cmd(LineTrackingSensor::Both, true), FollowCmd::Stop);
-        assert_eq!(follow_cmd(LineTrackingSensor::None, false), FollowCmd::Stop);
-        assert_eq!(follow_cmd(LineTrackingSensor::Both, false), FollowCmd::Forward);
-        assert_eq!(follow_cmd(LineTrackingSensor::Left, false), FollowCmd::SteerLeft);
-        assert_eq!(follow_cmd(LineTrackingSensor::Right, false), FollowCmd::SteerRight);
+        let n = LineTrackingSensor::None;
+        assert_eq!(follow_cmd(LineTrackingSensor::Both, true, n), FollowCmd::Stop);
+        assert_eq!(follow_cmd(n, false, n), FollowCmd::Stop);
+        assert_eq!(
+            follow_cmd(LineTrackingSensor::Both, false, n),
+            FollowCmd::Forward
+        );
+        assert_eq!(
+            follow_cmd(LineTrackingSensor::Left, false, n),
+            FollowCmd::SteerRight
+        );
+        assert_eq!(
+            follow_cmd(LineTrackingSensor::Right, false, n),
+            FollowCmd::SteerLeft
+        );
+        assert_eq!(
+            follow_cmd(n, false, LineTrackingSensor::Left),
+            FollowCmd::SteerRight
+        );
     }
 }

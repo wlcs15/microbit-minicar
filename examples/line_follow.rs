@@ -27,9 +27,10 @@ use microbit_minicar::motor::{self, Direction, Motor};
 use microbit_minicar::ultra;
 use panic_halt as _;
 
-const FOLLOW_SPEED: u8 = 70;
-const STEER_SLOW: u8 = 25;
+const FOLLOW_SPEED: u8 = 80;
+const STEER_SLOW: u8 = 0;
 const STOP_CM: u32 = 12;
+const LOST_MS: u32 = 1_200;
 
 fn glyph(c: u8) -> [u8; 5] {
     match c {
@@ -106,13 +107,17 @@ fn main() -> ! {
     let _ = led::disable(&mut i2c);
 
     let mut following = false;
+    let mut last_line = LineTrackingSensor::None;
+    let mut lost_ms = 0u32;
     loop {
         if button_b.is_low().unwrap_or(false) {
             following = false;
+            lost_ms = 0;
             let _ = motor::stop(&mut i2c);
         }
         if button_a.is_low().unwrap_or(false) {
             following = true;
+            lost_ms = 0;
         }
 
         let line = line_tracking::read(&mut left, &mut right)
@@ -121,10 +126,25 @@ fn main() -> ! {
         let obstacle = matches!(dist, Ok(Some(cm)) if cm < STOP_CM);
 
         if following {
-            let cmd = line_tracking::follow_cmd(line, obstacle);
+            let cmd = line_tracking::follow_cmd(line, obstacle, last_line);
+            if line == LineTrackingSensor::None && !obstacle {
+                lost_ms = lost_ms.saturating_add(50);
+                if lost_ms >= LOST_MS {
+                    let _ = motor::stop(&mut i2c);
+                    following = false;
+                    lost_ms = 0;
+                    show_glyph(&mut display, &mut timer, b'N', 200);
+                    continue;
+                }
+            } else {
+                lost_ms = 0;
+            }
             apply_drive(&mut i2c, cmd);
-            if cmd == FollowCmd::Stop {
+            if cmd == FollowCmd::Stop && obstacle {
                 following = false;
+            }
+            if line != LineTrackingSensor::None {
+                last_line = line;
             }
             show_glyph(
                 &mut display,
@@ -134,6 +154,9 @@ fn main() -> ! {
             );
         } else {
             let _ = motor::stop(&mut i2c);
+            if line != LineTrackingSensor::None {
+                last_line = line;
+            }
             show_glyph(&mut display, &mut timer, line_glyph(line), 80);
         }
     }

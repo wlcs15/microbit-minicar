@@ -33,6 +33,27 @@ where
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FollowCmd {
+    Stop,
+    Forward,
+    SteerLeft,
+    SteerRight,
+}
+
+/// Open-loop follow. `obstacle` is ultrasonic halt (no RGB/IR).
+pub fn follow_cmd(line: LineTrackingSensor, obstacle: bool) -> FollowCmd {
+    if obstacle {
+        return FollowCmd::Stop;
+    }
+    match line {
+        LineTrackingSensor::Both => FollowCmd::Forward,
+        LineTrackingSensor::Left => FollowCmd::SteerLeft,
+        LineTrackingSensor::Right => FollowCmd::SteerRight,
+        LineTrackingSensor::None => FollowCmd::Stop,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,5 +108,14 @@ mod tests {
         let mut l = pin(true);
         let mut r = pin(true);
         assert_eq!(read(&mut l, &mut r).unwrap(), LineTrackingSensor::None);
+    }
+
+    #[test]
+    fn follow_stops_on_obstacle_or_none() {
+        assert_eq!(follow_cmd(LineTrackingSensor::Both, true), FollowCmd::Stop);
+        assert_eq!(follow_cmd(LineTrackingSensor::None, false), FollowCmd::Stop);
+        assert_eq!(follow_cmd(LineTrackingSensor::Both, false), FollowCmd::Forward);
+        assert_eq!(follow_cmd(LineTrackingSensor::Left, false), FollowCmd::SteerLeft);
+        assert_eq!(follow_cmd(LineTrackingSensor::Right, false), FollowCmd::SteerRight);
     }
 }

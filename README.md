@@ -219,7 +219,8 @@ python3 tools/clock_gui.py   # Open /dev/ttyACM1, not ACM0 (Pi debug probe)
 Do **not** flash `motor` until mapping is done. It is a continuous drive loop and drains AAAs.
 
 1. `clock_idle` — daily: clock, log, menu. Menu `9` is USB debug for wheel map.
-2. `wheel_cal` — **floor calibration**. Button A: map motors, then **spin 360° CW and CCW** using the LSM303AGR **magnetometer**. Button B: N/NE vs degrees. Mapping + yaw are stored in **on-chip flash** (`0x0007E000`); the **latest `WheelMap` / `Yaw360` records** are the live values for **this** board. Re-run A on a different car/motors to overwrite-by-append (or menu `8` on `clock_idle` to erase the log first).
+2. `wheel_cal` — **floor calibration**. Button A: map, mag ~360 CW/CCW, then ~3 ft straight (`S`).
+3. `line_follow` — P12/P13 idle **B/L/R/N**; Button **A** slow follow; ultrasonic P14/P15 halt &lt;12 cm (**X**); Button **B** stop. RGB/IR not used.
 3. `led_color_set` — I2C RGB, motors stopped
 4. `accel_motor_map` — older RTT pulse helper
 5. `motor_spin` — one motor at a time

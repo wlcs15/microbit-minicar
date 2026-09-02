@@ -473,6 +473,13 @@ pub fn run_all(out: &mut impl FnMut(&str, bool)) -> Report {
         line_tracking::read(&mut l, &mut r) == Ok(LineTrackingSensor::None),
         out,
     );
+    check_eq(
+        &mut rep,
+        "follow_stop",
+        line_tracking::follow_cmd(LineTrackingSensor::Both, true)
+            == line_tracking::FollowCmd::Stop,
+        out,
+    );
 
     let mut i2c = FakeI2c { last: [0, 0] };
     let _ = motor::set(&mut i2c, 200, Motor::A, Direction::Forward);

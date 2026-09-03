@@ -2,9 +2,9 @@
 
 Rust drivers and examples for the **HolaSmart HS1002** car on a BBC **micro:bit v2**.
 
-This is the **wlcs15** fork (`https://github.com/wlcs15/microbit-minicar`). Keyestudio MiniCar motor encoding is not kept. Branch for this port: `holasmart_HS1002`. Current tag: **v1.00**. Oval line-follow verified CW and CCW; Button B stops.
+This is the **wlcs15** fork (`https://github.com/wlcs15/microbit-minicar`). Keyestudio MiniCar motor encoding is not kept. Branch for this port: `holasmart_HS1002`. Current tag: **v1.01** (Windows 11 tools). Oval line-follow verified CW and CCW; Button B stops.
 
-**Paused 02/09/2026** until credits renew (after Saturday). Flashed: `line_follow`. Do not flash `examples/motor.rs`.
+**Paused 02/09/2026** (credits ~1%). Flashed: `line_follow`. Do not flash `examples/motor.rs`. Host tests/clippy/coverage OK on Windows; **on-target flash still failing** (see below).
 
 ### Next after Saturday (Keyestudio MiniCar features still open on HS1002)
 
@@ -31,12 +31,42 @@ Library: `src/`. Board wiring: `examples/`.
 
 ## Quality gates
 
+Windows 11 PowerShell (repo root):
+
+```powershell
+.\utils\check_tools.ps1
+.\utils\run_host_tests.ps1    # cargo test --lib on x86_64-pc-windows-msvc
+.\utils\run_coverage.ps1      # >= 95% lines on this crate's src/ (host llvm-cov)
+.\utils\run_clippy.ps1        # Clippy -D warnings
+.\utils\run_lizard.ps1        # cyclomatic complexity; fail if CCN > 10
+```
+
+Linux / Git Bash:
+
 ```bash
-./utils/run_host_tests.sh     # cargo test --lib on x86_64
+./utils/run_host_tests.sh     # cargo test --lib on rustc host triple
 ./utils/run_coverage.sh       # >= 95% lines on this crate's src/ (host llvm-cov)
 ./utils/run_clippy.sh         # Clippy -D warnings
 ./utils/run_lizard.sh         # cyclomatic complexity; fail if CCN > 10
 ```
+
+### Remaining (Windows 11 DAPLink) — do not use `--connect-under-reset`
+
+`probe-rs list` shows two probes: Pi debug probe `2e8a:000c` (ignore; no SWD header on this board) and BBC micro:bit `0d28:0204-5`. Always pass `--probe 0d28:0204-5`.
+
+**1. `.\utils\run_on_target_tests.ps1`** — still failing. With `--connect-under-reset` (removed in v1.01):
+
+```text
+WARN probe_rs::session: Timeout while deasserting hardware reset pin.
+Error: Connecting to the chip was unsuccessful.
+Caused by: A timeout occurred.
+```
+
+micro:bit DAPLink has **no wired nRESET** for that flag. Without it, an earlier run erased then died at ~97% program (`page write 0x0001b000`, CMSIS-DAP `Transfer` USB timeout), then `Could not determine a suitable packet size`. Unplug/replug USB before retrying. Close `clock_gui` / any COM owner first.
+
+**2. `cargo flash --chip nRF52833_xxAA --probe 0d28:0204-5 --protocol swd --speed 100 --disable-double-buffering --example clock_idle`** — same reset-pin timeout if `--connect-under-reset` is still on the command. Use the line above (no connect-under-reset). If the probe is wedged after a failed flash, unplug/replug first.
+
+Host (v1.01, Windows): 75 lib tests pass; clippy `-D warnings` pass; llvm-cov **97.02%** lines. Lizard still fails CCN > 10 (`measure_cm` 14, `decode` 12, `push_byte` 11, `run_all` 11).
 
 **Cyclomatic complexity limit is 10** (not 15). Measured with [lizard](https://github.com/terryyin/lizard) (`-C 10`) on `src` and `examples`.
 

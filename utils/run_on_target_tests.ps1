@@ -27,20 +27,13 @@ function Invoke-OnTargetTests {
 $code = Invoke-OnTargetTests
 if ($code -ne 0) {
     Write-Host ""
-    Write-Host "Flash/USB timed out. Retrying once in 3s (unplug is not required for this retry)..."
-    Start-Sleep -Seconds 3
-    $code = Invoke-OnTargetTests
-}
-
-if ($code -ne 0) {
-    Write-Host ""
-    Write-Host "On-target tests still failed. This is a DAPLink USB/SWD error, not a Rust compile error."
-    Write-Host "Recover, then re-run this script:"
-    Write-Host "  1. Close anything using the micro:bit COM port (clock_gui, miniterm, PuTTY)."
-    Write-Host "  2. Unplug the micro:bit USB, wait 2 seconds, plug it back in."
-    Write-Host "  3. Confirm: probe-rs list   (want BBC micro:bit CMSIS-DAP -- 0d28:0204)"
-    Write-Host "  4. .\utils\run_on_target_tests.ps1"
-    Write-Host "Ignore the Raspberry Pi debug probe (2e8a:000c); this board has no SWD header."
+    Write-Host "On-target tests failed (DAPLink USB/SWD). Do NOT retry until you unplug."
+    Write-Host "A second flash without unplug yields: Could not determine a suitable packet size."
+    Write-Host "  1. Close clock_gui / miniterm / PuTTY (COM port)."
+    Write-Host "  2. Unplug the Raspberry Pi debug probe (2e8a:000c) if it is plugged in."
+    Write-Host "  3. Unplug the micro:bit USB, wait 2 seconds, plug it back in."
+    Write-Host "  4. probe-rs list   (want BBC micro:bit CMSIS-DAP -- 0d28:0204)"
+    Write-Host "  5. .\utils\run_on_target_tests.ps1"
     exit $code
 }
 

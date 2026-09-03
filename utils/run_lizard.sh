@@ -3,5 +3,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 # Cyclomatic complexity gate is 10 (not 15).
-lizard src examples -l rust -C 10 -L 1000
+# python -m lizard works when the lizard script is not on PATH (Windows).
+if command -v lizard >/dev/null 2>&1; then
+  lizard src examples -l rust -C 10 -L 1000
+else
+  python -m lizard src examples -l rust -C 10 -L 1000
+fi
 echo "OK: lizard CCN <= 10 (src + examples)"

@@ -263,11 +263,10 @@ mod tests {
         let mut rng: u64 = 0xC0FFEE;
         for _ in 0..100 {
             let mut ui = SerialUi::new();
-            let mut last = None;
             for _ in 0..10 {
                 rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1);
                 let op = ops[(rng as usize) % ops.len()];
-                last = line(&mut ui, core::str::from_utf8(op).unwrap());
+                let last = line(&mut ui, core::str::from_utf8(op).unwrap());
                 if ui.debug_on {
                     assert_ne!(last, Some(Cmd::Menu));
                 }

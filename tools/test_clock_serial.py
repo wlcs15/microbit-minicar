@@ -1,14 +1,22 @@
 #!/usr/bin/env python3
-"""GUI + firmware-protocol tests (PTY / in-process). No micro:bit required."""
+"""GUI + firmware-protocol tests (PTY / in-process). No micro:bit required.
+
+PTY round-trips are Unix-only. On Windows those two tests are skipped; DTR/RTS
+and protocol bytes are still covered with an in-process serial mock.
+"""
 from __future__ import annotations
 
 import os
-import pty
 import random
 import sys
 import time
 import unittest
 from unittest import mock
+
+try:
+    import pty
+except ImportError:  # Windows has no POSIX pty/termios
+    pty = None
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import clock_gui as cg  # noqa: E402
@@ -168,6 +176,34 @@ class GuiEncodeTests(unittest.TestCase):
         g._clear_rtc()
         self.assertEqual(g.ser.buf, b"?7")
 
+    def test_open_serial_dtr_off_mocked(self):
+        class FakeSerial:
+            def __init__(self):
+                self.port = None
+                self.baudrate = None
+                self.timeout = None
+                self.write_timeout = None
+                self.dsrdtr = True
+                self.rtscts = True
+                self.dtr = True
+                self.rts = True
+                self.opened = False
+
+            def open(self):
+                self.opened = True
+
+            def reset_input_buffer(self):
+                pass
+
+        with mock.patch("clock_gui.serial.Serial", FakeSerial):
+            s = cg.open_serial("COM3" if sys.platform == "win32" else "/dev/ttyACM1")
+        self.assertTrue(s.opened)
+        self.assertFalse(s.dtr)
+        self.assertFalse(s.rts)
+        self.assertFalse(s.dsrdtr)
+        self.assertFalse(s.rtscts)
+
+    @unittest.skipUnless(pty is not None, "pty is Unix-only")
     def test_open_serial_dtr_off(self):
         master, slave = pty.openpty()
         try:
@@ -203,6 +239,7 @@ class GuiEncodeTests(unittest.TestCase):
             else:
                 self.assertEqual(fw.push(ord("z")), ("menu", None))
 
+    @unittest.skipUnless(pty is not None, "pty is Unix-only")
     def test_pty_roundtrip(self):
         master, slave = pty.openpty()
         try:

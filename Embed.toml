@@ -1,10 +1,17 @@
 [default.general]
 chip = "nRF52833_xxAA"
+# DAPLink on micro:bit v2 has no wired nRESET for connect-under-reset.
+connect_under_reset = false
 
 # Prefer the micro:bit DAPLink, not the Raspberry Pi Debug Probe on the same machine.
 [default.probe]
 usb_vid = "0d28"
 usb_pid = "0204"
+protocol = "Swd"
+speed = 100
+
+[default.flashing]
+disable_double_buffering = true
 
 [default.rtt]
 enabled = true

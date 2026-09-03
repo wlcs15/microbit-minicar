@@ -61,10 +61,10 @@ impl I2c<SevenBitAddress> for FakeI2c {
             return Ok(());
         }
         for op in operations {
-            if let Operation::Write(bytes) = op {
-                if bytes.len() >= 2 {
-                    self.last = [bytes[0], bytes[1]];
-                }
+            if let Operation::Write(bytes) = op
+                && bytes.len() >= 2
+            {
+                self.last = [bytes[0], bytes[1]];
             }
         }
         Ok(())

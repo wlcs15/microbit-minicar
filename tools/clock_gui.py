@@ -2,8 +2,8 @@
 """Host helper for clock_idle on the micro:bit v2.
 
 Does not assert DTR/RTS (those often reset the nRF via DAPLink, which is why
-minicom/pyserial can look like 'no serial'). Close minicom first — one process
-owns /dev/ttyACM1.
+a terminal/pyserial can look like 'no serial'). Close any other serial program
+first — one process owns the port (Linux /dev/ttyACM1, Windows COMx).
 
 Flash log on the micro:bit is the source of truth for floor runs; this GUI is
 only for set-time and dump while USB is plugged in.
@@ -11,12 +11,17 @@ only for set-time and dump while USB is plugged in.
 from __future__ import annotations
 
 import glob
+import sys
 import time
 import tkinter as tk
 from tkinter import messagebox, ttk
 
 import serial
 from serial.tools import list_ports
+
+# BBC micro:bit v2 DAPLink USB identity (same probe as cargo flash --probe).
+MICROBIT_VID = 0x0D28
+MICROBIT_PID = 0x0204
 
 
 def encode_set_time(unix: int) -> bytes:
@@ -86,10 +91,9 @@ class ClockGui(tk.Tk):
         ttk.Label(top, text="Port").pack(side=tk.LEFT)
         self.port = ttk.Combobox(top, width=36, values=self._ports())
         self.port.pack(side=tk.LEFT, padx=6)
-        if "/dev/ttyACM1" in self.port["values"]:
-            self.port.set("/dev/ttyACM1")
-        elif self.port["values"]:
-            self.port.current(0)
+        preferred = self._preferred_port(list(self.port["values"]))
+        if preferred:
+            self.port.set(preferred)
         ttk.Button(top, text="Refresh", command=self._refresh).pack(side=tk.LEFT)
         ttk.Button(top, text="Open", command=self._open).pack(side=tk.LEFT, padx=4)
         ttk.Button(top, text="Close", command=self._close).pack(side=tk.LEFT)
@@ -112,17 +116,29 @@ class ClockGui(tk.Tk):
         self.log = tk.Text(self, height=18)
         self.log.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
         self._note(
-            "Close minicom first. DTR is off.\n"
+            "Close any other serial program first. DTR is off.\n"
             "After Open you should see dbg/boot lines. Any key (or Menu) stops debug.\n"
             "Set time still sends T=<unix>. Button A on the board shows log COUNT (1 = one record), not 1-9."
         )
 
     def _ports(self) -> list[str]:
         found = [p.device for p in list_ports.comports()]
-        for extra in glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*"):
-            if extra not in found:
-                found.append(extra)
+        if sys.platform != "win32":
+            for extra in glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*"):
+                if extra not in found:
+                    found.append(extra)
         return found
+
+    @staticmethod
+    def _preferred_port(devices: list[str]) -> str | None:
+        for p in list_ports.comports():
+            if (p.vid, p.pid) == (MICROBIT_VID, MICROBIT_PID) and p.device in devices:
+                return p.device
+        if sys.platform != "win32" and "/dev/ttyACM1" in devices:
+            return "/dev/ttyACM1"
+        if devices:
+            return devices[0]
+        return None
 
     def _refresh(self) -> None:
         self.port["values"] = self._ports()

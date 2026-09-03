@@ -18,6 +18,8 @@ include = [
     "/examples/*.rs",
     "/src/**/*.rs",
     "/utils/*.sh",
+    "/utils/*.ps1",
+    "/utils/*.cmd",
     "/tests/on_target.rs",
     "/build.rs",
 ]

@@ -229,7 +229,6 @@ fn main() -> ! {
     let mut wall = WallClock::new_unset(TICKS_PER_SEC);
     let mut seq = Seq::new();
     let mut ui = SerialUi::new();
-    let mut last_rx: u8 = 0;
     let mut last_dbg_ticks: u32 = 0;
 
     persist(
@@ -246,7 +245,6 @@ fn main() -> ! {
         let mut n_rx = 0u32;
         while let Some(c) = uart_irq::read_byte() {
             n_rx += 1;
-            last_rx = c;
             if c >= 32 && c < 127 {
                 let _ = write!(uart_irq::writer(), "{}", c as char);
             }
@@ -259,7 +257,7 @@ fn main() -> ! {
                     rtc.get_counter(),
                     &mut nvmc,
                     &mut seq,
-                    last_rx,
+                    c,
                     ticks,
                     &ui,
                     &mut i2c,
@@ -308,7 +306,6 @@ fn main() -> ! {
                 let frames = stamp.len() * 6 + 5;
                 for origin in 0..frames {
                     while let Some(c) = uart_irq::read_byte() {
-                        last_rx = c;
                         if let Some(cmd) = ui.push_byte(c) {
                             handle_cmd(
                                 cmd,
@@ -318,7 +315,7 @@ fn main() -> ! {
                                 rtc.get_counter(),
                                 &mut nvmc,
                                 &mut seq,
-                                last_rx,
+                                c,
                                 rtc.get_counter(),
                                 &ui,
                                 &mut i2c,

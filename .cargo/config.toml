@@ -3,3 +3,7 @@ target ="thumbv7em-none-eabihf"
 
 [target.thumbv7em-none-eabihf]
 rustflags = ["-C", "link-arg=-Tlink.x"]
+# DAPLink CMSIS-DAP on Windows times out with default double-buffered SWD.
+# --probe 0d28:0204 is the micro:bit, not a Pi debug probe on the same PC.
+# DAPLink on micro:bit v2 has no wired nRESET for --connect-under-reset.
+runner = "probe-rs run --chip nRF52833_xxAA --probe 0d28:0204-5 --protocol swd --speed 100 --disable-double-buffering --non-interactive"

@@ -2,8 +2,10 @@
 //!
 //!   cargo test --features on-target --test on_target --target thumbv7em-none-eabihf
 //!
-//! with runner `probe-rs run --chip nRF52833_xxAA --probe 0d28:0204`.
+//! with runner
+//! `probe-rs run --chip nRF52833_xxAA --probe 0d28:0204-5 --protocol swd --speed 100 --disable-double-buffering`.
 //! Overwrites `clock_idle` until you re-flash the app.
+//! On Windows DAPLink USB timeouts, unplug/replug the micro:bit then re-run.
 
 #![no_std]
 #![no_main]

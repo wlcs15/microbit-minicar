@@ -89,11 +89,13 @@ echo
 echo "[python / lizard / serial GUI]"
 if [ -n "$py" ]; then
   ok python "$($py --version 2>&1)"
-  if $py -m lizard --version >/dev/null 2>&1; then
+   if have lizard; then
+    ok lizard "$(lizard --version 2>&1 | head -n1)"
+  elif $py -m lizard --version >/dev/null 2>&1; then
     ok lizard "$($py -m lizard --version 2>&1 | head -n1)"
   else
-    need lizard "$py -m pip install --user lizard"
-  fi
+    need lizard "pipx install lizard"
+   fi 
   if $py -c "import serial" >/dev/null 2>&1; then
     ok pyserial
   else
